@@ -6,6 +6,7 @@ extern crate alloc;
 use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -189,12 +190,290 @@ fn upsert_param(
 }
 
 fn fmt_num(v: f64) -> String {
+    if libm::fabs(v) < 1e-10 {
+        return "0".into();
+    }
     if libm::fabs(v - libm::round(v)) < 1e-9 {
         format!("{}", libm::round(v) as i64)
     } else {
         let s = format!("{v:.6}");
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
+}
+
+fn v_add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn v_sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn v_scale(a: [f64; 3], s: f64) -> [f64; 3] {
+    [a[0] * s, a[1] * s, a[2] * s]
+}
+
+fn v_dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn v_cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn v_len(a: [f64; 3]) -> f64 {
+    libm::sqrt(v_dot(a, a))
+}
+
+fn v_norm(a: [f64; 3]) -> Option<[f64; 3]> {
+    let l = v_len(a);
+    if l < 1e-9 {
+        None
+    } else {
+        Some([a[0] / l, a[1] / l, a[2] / l])
+    }
+}
+
+fn parse_vec3(v: &Value) -> Option<[f64; 3]> {
+    let a = v.as_array()?;
+    if a.len() < 3 {
+        return None;
+    }
+    Some([a[0].as_f64()?, a[1].as_f64()?, a[2].as_f64()?])
+}
+
+#[derive(Clone, Copy)]
+struct PlacementFrame {
+    origin: [f64; 3],
+    x_dir: [f64; 3],
+    y_dir: [f64; 3],
+    z_dir: [f64; 3],
+}
+
+impl PlacementFrame {
+    fn from_axis(origin: [f64; 3], axis: [f64; 3]) -> Self {
+        let z = v_norm(axis).unwrap_or([0.0, 0.0, 1.0]);
+        // Pick a stable reference vector not parallel to z.
+        let ref_v = if libm::fabs(z[2]) < 0.9 {
+            [0.0, 0.0, 1.0]
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        let x = v_norm(v_cross(ref_v, z)).unwrap_or([1.0, 0.0, 0.0]);
+        let y = v_norm(v_cross(z, x)).unwrap_or([0.0, 1.0, 0.0]);
+        Self { origin, x_dir: x, y_dir: y, z_dir: z }
+    }
+
+    fn from_base_plane(plane: &str) -> Self {
+        match plane {
+            "XZ" => Self {
+                origin: [0.0, 0.0, 0.0],
+                x_dir: [1.0, 0.0, 0.0],
+                y_dir: [0.0, 0.0, -1.0],
+                z_dir: [0.0, 1.0, 0.0],
+            },
+            "YZ" => Self {
+                origin: [0.0, 0.0, 0.0],
+                x_dir: [0.0, 1.0, 0.0],
+                y_dir: [0.0, 0.0, 1.0],
+                z_dir: [1.0, 0.0, 0.0],
+            },
+            _ => Self {
+                origin: [0.0, 0.0, 0.0],
+                x_dir: [1.0, 0.0, 0.0],
+                y_dir: [0.0, 1.0, 0.0],
+                z_dir: [0.0, 0.0, 1.0],
+            },
+        }
+    }
+
+    fn apply_adjustments(mut self, flip: bool, axial_offset: f64, layout_angle_deg: f64) -> Self {
+        if flip {
+            self.z_dir = v_scale(self.z_dir, -1.0);
+            self.y_dir = v_scale(self.y_dir, -1.0);
+        }
+        if libm::fabs(axial_offset) > 1e-9 {
+            self.origin = v_add(self.origin, v_scale(self.z_dir, axial_offset));
+        }
+        if libm::fabs(layout_angle_deg) > 1e-9 {
+            let rad = layout_angle_deg * core::f64::consts::PI / 180.0;
+            let c = libm::cos(rad);
+            let s = libm::sin(rad);
+            let nx = v_add(v_scale(self.x_dir, c), v_scale(self.y_dir, s));
+            let ny = v_add(v_scale(self.x_dir, -s), v_scale(self.y_dir, c));
+            self.x_dir = v_norm(nx).unwrap_or(self.x_dir);
+            self.y_dir = v_norm(ny).unwrap_or(self.y_dir);
+        }
+        self
+    }
+
+    fn origin_json(&self, offset_param: Option<&str>) -> Value {
+        match offset_param {
+            None => json!([self.origin[0], self.origin[1], self.origin[2]]),
+            Some(dist_p) => {
+                let comp = |o: f64, d: f64| -> Value {
+                    if libm::fabs(d) < 1e-9 {
+                        json!(o)
+                    } else if libm::fabs(o) < 1e-9 {
+                        if libm::fabs(d - 1.0) < 1e-9 {
+                            json!(dist_p)
+                        } else if libm::fabs(d + 1.0) < 1e-9 {
+                            json!(format!("-{dist_p}"))
+                        } else {
+                            json!(format!("{dist_p} * {}", fmt_num(d)))
+                        }
+                    } else {
+                        json!(format!("{} mm + {dist_p} * {}", fmt_num(o), fmt_num(d)))
+                    }
+                };
+                json!([
+                    comp(self.origin[0], self.x_dir[0]),
+                    comp(self.origin[1], self.x_dir[1]),
+                    comp(self.origin[2], self.x_dir[2]),
+                ])
+            }
+        }
+    }
+}
+
+fn circumcenter_3d(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> Option<([f64; 3], [f64; 3])> {
+    let ab = v_sub(b, a);
+    let ac = v_sub(c, a);
+    let n = v_cross(ab, ac);
+    let n2 = v_dot(n, n);
+    if n2 < 1e-10 {
+        return None;
+    }
+    let ab2 = v_dot(ab, ab);
+    let ac2 = v_dot(ac, ac);
+    let term1 = v_scale(v_cross(n, ab), ac2);
+    let term2 = v_scale(v_cross(ac, n), ab2);
+    let offset = v_scale(v_add(term1, term2), 1.0 / (2.0 * n2));
+    Some((v_add(a, offset), v_norm(n)?))
+}
+
+fn resolve_placement(
+    picks: &[Value],
+    base_plane: &str,
+    flip: bool,
+    axial_offset: f64,
+    layout_angle_deg: f64,
+) -> Result<PlacementFrame, PluginError> {
+    let mut frame = PlacementFrame::from_base_plane(base_plane);
+    if let Some(pick) = picks.first() {
+        let ptype = pick.get("type").and_then(Value::as_str).unwrap_or("");
+        match ptype {
+            "face" => {
+                let body = pick
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| invalid("placement", "face pick missing body"))?;
+                let faces_res = run_cmd("model.faces", json!({ "body": body }))?;
+                let faces = faces_res
+                    .get("faces")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| invalid("placement", "body has no faces"))?;
+                let target_idx = pick.get("index").and_then(Value::as_u64);
+                let face = target_idx
+                    .and_then(|idx| faces.iter().find(|f| f.get("index").and_then(Value::as_u64) == Some(idx)))
+                    .or_else(|| faces.first())
+                    .ok_or_else(|| invalid("placement", "picked face not found"))?;
+                if let Some(cyl) = face.get("cylinder").and_then(Value::as_object) {
+                    let origin = cyl.get("origin").and_then(parse_vec3).unwrap_or([0.0, 0.0, 0.0]);
+                    let axis = cyl.get("axis").and_then(parse_vec3).unwrap_or([0.0, 0.0, 1.0]);
+                    frame = PlacementFrame::from_axis(origin, axis);
+                } else if let Some(norm) = face.get("plane_normal").and_then(parse_vec3) {
+                    let origin = face
+                        .get("centroid")
+                        .and_then(parse_vec3)
+                        .or_else(|| pick.get("point").and_then(parse_vec3))
+                        .unwrap_or([0.0, 0.0, 0.0]);
+                    frame = PlacementFrame::from_axis(origin, norm);
+                } else if let Some(pt) = pick.get("point").and_then(parse_vec3) {
+                    frame.origin = pt;
+                }
+            }
+            "edge" => {
+                let body = pick
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| invalid("placement", "edge pick missing body"))?;
+                let edges_res = run_cmd("model.edges", json!({ "body": body }))?;
+                let edges = edges_res
+                    .get("edges")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| invalid("placement", "body has no edges"))?;
+                let target_idx = pick.get("index").and_then(Value::as_u64);
+                let edge = target_idx
+                    .and_then(|idx| edges.iter().find(|e| e.get("index").and_then(Value::as_u64) == Some(idx)))
+                    .or_else(|| edges.first())
+                    .ok_or_else(|| invalid("placement", "picked edge not found"))?;
+                let s = edge.get("start").and_then(parse_vec3).unwrap_or([0.0, 0.0, 0.0]);
+                let m = edge.get("mid").and_then(parse_vec3).unwrap_or(s);
+                let e = edge.get("end").and_then(parse_vec3).unwrap_or(s);
+                if v_len(v_sub(s, e)) < 1e-4 && v_len(v_sub(s, m)) > 1e-4 {
+                    // Full circular rim edge: center is midpoint of start & mid; find axis from adjacent face.
+                    let center = v_scale(v_add(s, m), 0.5);
+                    let mut axis = [0.0, 0.0, 1.0];
+                    if let Ok(faces_res) = run_cmd("model.faces", json!({ "body": body })) {
+                        if let Some(faces) = faces_res.get("faces").and_then(Value::as_array) {
+                            let radial = v_norm(v_sub(s, center)).unwrap_or([1.0, 0.0, 0.0]);
+                            for f in faces {
+                                if let Some(n) = f.get("plane_normal").and_then(parse_vec3) {
+                                    if let Some(fc) = f.get("centroid").and_then(parse_vec3) {
+                                        if libm::fabs(v_dot(v_sub(center, fc), n)) < 1e-2
+                                            && libm::fabs(v_dot(radial, n)) < 1e-2
+                                        {
+                                            axis = n;
+                                            break;
+                                        }
+                                    }
+                                } else if let Some(cyl) = f.get("cylinder").and_then(Value::as_object) {
+                                    if let Some(ax) = cyl.get("axis").and_then(parse_vec3) {
+                                        if libm::fabs(v_dot(radial, ax)) < 1e-2 {
+                                            axis = ax;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    frame = PlacementFrame::from_axis(center, axis);
+                } else if let Some((center, norm)) = circumcenter_3d(s, m, e) {
+                    frame = PlacementFrame::from_axis(center, norm);
+                } else if let Some(dir) = v_norm(v_sub(e, s)) {
+                    frame = PlacementFrame::from_axis(s, dir);
+                }
+            }
+            "sketch_point" | "sketch_curve" => {
+                if let Some(sk) = pick.get("sketch") {
+                    if let Ok(sk_res) = run_cmd("sketch.inspect", json!({ "sketch": sk })) {
+                        if let Some(plane) = sk_res.get("plane").and_then(Value::as_object) {
+                            let o = plane.get("origin").and_then(parse_vec3).unwrap_or([0.0, 0.0, 0.0]);
+                            let x = plane.get("x_dir").and_then(parse_vec3).and_then(v_norm).unwrap_or([1.0, 0.0, 0.0]);
+                            let y = plane.get("y_dir").and_then(parse_vec3).and_then(v_norm).unwrap_or([0.0, 1.0, 0.0]);
+                            let z = v_norm(v_cross(x, y)).unwrap_or([0.0, 0.0, 1.0]);
+                            frame = PlacementFrame { origin: o, x_dir: x, y_dir: y, z_dir: z };
+                        }
+                    }
+                }
+                if let Some(pt) = pick.get("point").and_then(parse_vec3) {
+                    frame.origin = pt;
+                }
+            }
+            _ => {
+                if let Some(pt) = pick.get("point").and_then(parse_vec3) {
+                    frame.origin = pt;
+                }
+            }
+        }
+    }
+    Ok(frame.apply_adjustments(flip, axial_offset, layout_angle_deg))
 }
 
 struct GearSpec<'a> {
@@ -207,7 +486,8 @@ struct GearSpec<'a> {
     bl_param: &'a str,
     bore_param: Option<&'a str>,
     phi_param: Option<&'a str>,
-    origin_x_expr: Option<&'a str>,
+    frame: PlacementFrame,
+    offset_x_param: Option<&'a str>,
     sketch_name: &'a str,
     body_name: &'a str,
     module_val: f64,
@@ -306,18 +586,17 @@ fn build_parametric_gear(
         false,
     )?;
 
-    let base_origin = match spec.origin_x_expr {
-        Some(ox) => json!([ox, 0.0, 0.0]),
-        None => json!([0.0, 0.0, 0.0]),
-    };
+    let base_origin = spec.frame.origin_json(spec.offset_x_param);
+    let axis_vec = json!([spec.frame.z_dir[0], spec.frame.z_dir[1], spec.frame.z_dir[2]]);
 
-    // 1. Root cylinder hub (parametric radius & height & center).
+    // 1. Root cylinder hub (parametric radius, height, axis & center).
     let hub_res = run_cmd(
         "solid.cylinder",
         json!({
             "radius": rf,
             "height": fw,
             "base": base_origin,
+            "axis": axis_vec,
             "operation": "new_body",
             "body_name": spec.body_name,
         }),
@@ -330,15 +609,12 @@ fn build_parametric_gear(
         .unwrap_or(spec.body_name)
         .to_string();
 
-    // 2. Parametric single-tooth sketch centered on gear axis.
-    let plane_arg = match spec.origin_x_expr {
-        Some(ox) => json!({
-            "origin": [ox, 0.0, 0.0],
-            "x_dir": [1.0, 0.0, 0.0],
-            "y_dir": [0.0, 1.0, 0.0],
-        }),
-        None => json!("XY"),
-    };
+    // 2. Parametric single-tooth sketch centered on gear axis in the placement frame.
+    let plane_arg = json!({
+        "origin": base_origin,
+        "x_dir": [spec.frame.x_dir[0], spec.frame.x_dir[1], spec.frame.x_dir[2]],
+        "y_dir": [spec.frame.y_dir[0], spec.frame.y_dir[1], spec.frame.y_dir[2]],
+    });
     run_cmd(
         "sketch.create",
         json!({
@@ -442,7 +718,7 @@ fn build_parametric_gear(
             "features": [tooth_feature],
             "axis": {
                 "origin": base_origin,
-                "dir": [0.0, 0.0, 1.0],
+                "dir": axis_vec,
             },
             "count": z,
             "angle": "360 deg",
@@ -458,6 +734,7 @@ fn build_parametric_gear(
                     "diameter": bore_p,
                     "height": fw,
                     "base": base_origin,
+                    "axis": axis_vec,
                     "operation": "cut",
                     "targets": [&actual_body],
                 }),
@@ -479,6 +756,10 @@ fn build_parametric_gear(
 #[derive(Deserialize)]
 #[serde(default)]
 struct SpurGearInput {
+    placement: Vec<Value>,
+    base_plane: String,
+    flip_direction: bool,
+    axial_offset: f64,
     prefix: String,
     module: f64,
     teeth: u32,
@@ -493,6 +774,10 @@ struct SpurGearInput {
 impl Default for SpurGearInput {
     fn default() -> Self {
         Self {
+            placement: Vec::new(),
+            base_plane: "XY".into(),
+            flip_direction: false,
+            axial_offset: 0.0,
             prefix: "g1".into(),
             module: 2.0,
             teeth: 20,
@@ -517,6 +802,7 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
         return Err(invalid("teeth", "teeth must be between 8 and 80"));
     }
 
+    let frame = resolve_placement(&inp.placement, &inp.base_plane, inp.flip_direction, inp.axial_offset, 0.0)?;
     let mut existing = list_existing_params()?;
     let mut existing_names = list_existing_doc_names()?;
     let p = choose_unique_prefix(&p, &existing, &existing_names);
@@ -559,7 +845,8 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
             bl_param: &bl_p,
             bore_param: if inp.bore_diameter > 0.0 { Some(&bore_p) } else { None },
             phi_param: None,
-            origin_x_expr: None,
+            frame,
+            offset_x_param: None,
             sketch_name: &sketch_name,
             body_name: &body_name,
             module_val: inp.module,
@@ -581,6 +868,11 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
 #[derive(Deserialize)]
 #[serde(default)]
 struct ParallelPairInput {
+    placement: Vec<Value>,
+    base_plane: String,
+    layout_angle: f64,
+    flip_direction: bool,
+    axial_offset: f64,
     prefix: String,
     module: f64,
     teeth_1: u32,
@@ -596,6 +888,11 @@ struct ParallelPairInput {
 impl Default for ParallelPairInput {
     fn default() -> Self {
         Self {
+            placement: Vec::new(),
+            base_plane: "XY".into(),
+            layout_angle: 0.0,
+            flip_direction: false,
+            axial_offset: 0.0,
             prefix: "p1".into(),
             module: 2.0,
             teeth_1: 16,
@@ -621,6 +918,13 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         return Err(invalid("teeth_1", "tooth counts must be between 8 and 80"));
     }
 
+    let frame = resolve_placement(
+        &inp.placement,
+        &inp.base_plane,
+        inp.flip_direction,
+        inp.axial_offset,
+        inp.layout_angle,
+    )?;
     let mut existing = list_existing_params()?;
     let mut existing_names = list_existing_doc_names()?;
     let p = choose_unique_prefix(&p, &existing, &existing_names);
@@ -705,7 +1009,8 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_1 > 0.0 { Some(&b1_p) } else { None },
             phi_param: None,
-            origin_x_expr: None,
+            frame,
+            offset_x_param: None,
             sketch_name: &g1_sketch,
             body_name: &g1_body,
             module_val: inp.module,
@@ -730,7 +1035,8 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_2 > 0.0 { Some(&b2_p) } else { None },
             phi_param: Some(&phi2_p),
-            origin_x_expr: Some(&cd_p),
+            frame,
+            offset_x_param: Some(&cd_p),
             sketch_name: &g2_sketch,
             body_name: &g2_body,
             module_val: inp.module,

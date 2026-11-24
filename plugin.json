@@ -8,6 +8,9 @@
     "module": "solidcraft-gear-suite.wasm",
     "commands": [
       "document.inspect",
+      "model.faces",
+      "model.edges",
+      "sketch.inspect",
       "parameters.list",
       "parameters.add",
       "parameters.change",
@@ -37,6 +40,10 @@
           "type": "object",
           "required": ["prefix", "module", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
+            "placement",
+            "base_plane",
+            "flip_direction",
+            "axial_offset",
             "prefix",
             "module",
             "teeth",
@@ -48,6 +55,40 @@
             "body_name"
           ],
           "properties": {
+            "placement": {
+              "type": "array",
+              "title": "Placement Reference (optional)",
+              "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the gear. Leave empty to place at Origin.",
+              "maxItems": 1,
+              "items": { "type": "object" },
+              "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+            },
+            "base_plane": {
+              "type": "string",
+              "title": "Base Plane (if no pick)",
+              "description": "Origin plane used when no Placement Reference is selected.",
+              "oneOf": [
+                { "const": "XY", "title": "XY Plane (Z Axis)" },
+                { "const": "XZ", "title": "XZ Plane (Y Axis)" },
+                { "const": "YZ", "title": "YZ Plane (X Axis)" }
+              ],
+              "default": "XY"
+            },
+            "flip_direction": {
+              "type": "boolean",
+              "title": "Flip Direction",
+              "description": "Reverse the gear extrude direction along the shaft axis.",
+              "default": false
+            },
+            "axial_offset": {
+              "type": "number",
+              "title": "Axial Offset",
+              "description": "Standoff distance along the shaft axis from the placement reference.",
+              "unit": "mm",
+              "minimum": -1000.0,
+              "maximum": 1000.0,
+              "default": 0.0
+            },
             "prefix": {
               "type": "string",
               "title": "Parameter Prefix",
@@ -135,6 +176,11 @@
           "type": "object",
           "required": ["prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
+            "placement",
+            "base_plane",
+            "layout_angle",
+            "flip_direction",
+            "axial_offset",
             "prefix",
             "module",
             "teeth_1",
@@ -147,6 +193,49 @@
             "backlash_mode"
           ],
           "properties": {
+            "placement": {
+              "type": "array",
+              "title": "Pinion Placement Reference (optional)",
+              "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the pinion. Leave empty to place at Origin.",
+              "maxItems": 1,
+              "items": { "type": "object" },
+              "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+            },
+            "base_plane": {
+              "type": "string",
+              "title": "Base Plane (if no pick)",
+              "description": "Origin plane used when no Placement Reference is selected.",
+              "oneOf": [
+                { "const": "XY", "title": "XY Plane (Z Axis)" },
+                { "const": "XZ", "title": "XZ Plane (Y Axis)" },
+                { "const": "YZ", "title": "YZ Plane (X Axis)" }
+              ],
+              "default": "XY"
+            },
+            "layout_angle": {
+              "type": "number",
+              "title": "Pair Layout Angle",
+              "description": "Angle in the gear plane from Pinion to Gear 2 (0 deg = +X, 90 deg = +Y).",
+              "unit": "deg",
+              "minimum": -360.0,
+              "maximum": 360.0,
+              "default": 0.0
+            },
+            "flip_direction": {
+              "type": "boolean",
+              "title": "Flip Direction",
+              "description": "Reverse the gear extrude direction along the shaft axis.",
+              "default": false
+            },
+            "axial_offset": {
+              "type": "number",
+              "title": "Axial Offset",
+              "description": "Standoff distance along the shaft axis from the placement reference.",
+              "unit": "mm",
+              "minimum": -1000.0,
+              "maximum": 1000.0,
+              "default": 0.0
+            },
             "prefix": {
               "type": "string",
               "title": "Parameter Prefix",
