@@ -23,7 +23,9 @@ struct RackPinionInput {
     prefix: String,
     module: f64,
     pinion_teeth: u32,
+    rack_sizing: String,
     rack_teeth: u32,
+    rack_length: f64,
     pressure_angle: f64,
     face_width: f64,
     rack_backing: f64,
@@ -43,7 +45,9 @@ impl Default for RackPinionInput {
             prefix: "rp1".into(),
             module: 2.0,
             pinion_teeth: 16,
+            rack_sizing: "by_teeth".into(),
             rack_teeth: 12,
+            rack_length: 80.0,
             pressure_angle: 20.0,
             face_width: 10.0,
             rack_backing: 8.0,
@@ -54,7 +58,7 @@ impl Default for RackPinionInput {
 }
 
 pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
-    let inp: RackPinionInput =
+    let mut inp: RackPinionInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.face_width <= 0.0 || inp.rack_backing <= 0.5 {
@@ -63,9 +67,19 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
     if inp.pinion_teeth < 8 || inp.pinion_teeth > 80 {
         return Err(invalid("pinion_teeth", "pinion_teeth must be between 8 and 80"));
     }
-    if inp.rack_teeth < 3 || inp.rack_teeth > 100 {
-        return Err(invalid("rack_teeth", "rack_teeth must be between 3 and 100"));
-    }
+    let pitch_mm = core::f64::consts::PI * inp.module;
+    let target_len = if inp.rack_sizing == "by_length" {
+        if inp.rack_length < 3.0 * pitch_mm {
+            return Err(invalid("rack_length", format!("rack_length must be at least {:.1} mm (3 pitches)", 3.0 * pitch_mm)));
+        }
+        inp.rack_teeth = (libm::floor(inp.rack_length / pitch_mm) as u32).clamp(3, 120);
+        inp.rack_length
+    } else {
+        if inp.rack_teeth < 3 || inp.rack_teeth > 120 {
+            return Err(invalid("rack_teeth", "rack_teeth must be between 3 and 120"));
+        }
+        (inp.rack_teeth as f64) * pitch_mm
+    };
 
     let frame = resolve_placement(
         &inp.placement,
@@ -153,8 +167,10 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
     // Half tooth width at pitch line = pitch/4 - half_bl/2.
     // Space centered at y=0, so teeth are centered at y = (i + 0.5) * pitch.
     let n = inp.rack_teeth as i32;
-    let y_start = -(n as f64) * pitch / 2.0;
-    let y_end = (n as f64) * pitch / 2.0;
+    let teeth_span = (n as f64) * pitch;
+    let y_tooth_start = -teeth_span / 2.0;
+    let y_start = -target_len / 2.0;
+    let y_end = target_len / 2.0;
     let hw_pitch = pitch / 4.0 - half_bl / 2.0;
     let hw_tip = (hw_pitch - add * tan_a).max(0.05 * m);
     let hw_root = hw_pitch + ded * tan_a;
@@ -163,7 +179,7 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
     pts.push(json!([x_back, y_start]));
     pts.push(json!([x_root, y_start]));
     for i in 0..n {
-        let yc = y_start + (i as f64 + 0.5) * pitch;
+        let yc = y_tooth_start + (i as f64 + 0.5) * pitch;
         pts.push(json!([x_root, yc - hw_root]));
         pts.push(json!([x_tip, yc - hw_tip]));
         pts.push(json!([x_tip, yc + hw_tip]));
@@ -197,7 +213,8 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
         "mode": "gm-rack-pinion",
         "prefix": p,
         "pitch_mm": pitch,
-        "rack_length_mm": (inp.rack_teeth as f64) * pitch,
+        "rack_teeth": inp.rack_teeth,
+        "rack_length_mm": target_len,
         "pinion": pinion,
         "rack_body": rack_body,
     })

@@ -22,9 +22,14 @@ struct BevelPairInput {
     flip_direction: bool,
     axial_offset: f64,
     prefix: String,
+    bevel_type: String,
+    spiral_angle: f64,
+    hand: String,
+    sizing_mode: String,
     module: f64,
     teeth_1: u32,
     teeth_2: u32,
+    gear_ratio: f64,
     shaft_angle: f64,
     pressure_angle: f64,
     face_width: f64,
@@ -43,9 +48,14 @@ impl Default for BevelPairInput {
             flip_direction: false,
             axial_offset: 0.0,
             prefix: "bv1".into(),
+            bevel_type: "straight".into(),
+            spiral_angle: 30.0,
+            hand: "right".into(),
+            sizing_mode: "by_teeth".into(),
             module: 2.0,
             teeth_1: 16,
             teeth_2: 24,
+            gear_ratio: 1.5,
             shaft_angle: 90.0,
             pressure_angle: 20.0,
             face_width: 10.0,
@@ -157,31 +167,58 @@ fn build_single_bevel(
     existing_names: &mut BTreeSet<String>,
     prefix: &str,
     frame: PlacementFrame,
-    z_out: f64,
-    z_in: f64,
+    re: f64,
+    ri: f64,
+    delta_rad: f64,
     module: f64,
-    scale: f64,
     teeth: u32,
     alpha_deg: f64,
     half_backlash: f64,
     phase_rad: f64,
+    is_spiral: bool,
+    spiral_angle_deg: f64,
+    hand_sign: f64,
     bore_dia: f64,
     body_name: &str,
 ) -> Result<String, PluginError> {
-    let sk_out = unique_name(&format!("{prefix}_Outer"), existing_names);
-    let sk_in = unique_name(&format!("{prefix}_Inner"), existing_names);
     let bname = unique_name(body_name, existing_names);
+    let n_sections: usize = if is_spiral { 4 } else { 2 };
+    let beta_rad = spiral_angle_deg * core::f64::consts::PI / 180.0;
+    let spiral_k = if is_spiral {
+        hand_sign * libm::tan(beta_rad) / libm::sin(delta_rad).max(0.15)
+    } else {
+        0.0
+    };
 
-    let prof_out = draw_bevel_section(&sk_out, frame, z_out, module, teeth, alpha_deg, half_backlash, phase_rad)?;
-    let prof_in = draw_bevel_section(&sk_in, frame, z_in, module * scale, teeth, alpha_deg, half_backlash * scale, phase_rad)?;
+    let mut sections = Vec::new();
+    for i in 0..n_sections {
+        let u = (i as f64) / ((n_sections - 1) as f64);
+        let r_cur = re + u * (ri - re);
+        let scale = r_cur / re;
+        let z_cur = r_cur * libm::cos(delta_rad);
+        let twist = if is_spiral {
+            spiral_k * libm::log(re / r_cur)
+        } else {
+            0.0
+        };
+        let sk = unique_name(&format!("{prefix}_Sec{i}"), existing_names);
+        let prof = draw_bevel_section(
+            &sk,
+            frame,
+            z_cur,
+            module * scale,
+            teeth,
+            alpha_deg,
+            half_backlash * scale,
+            phase_rad + twist,
+        )?;
+        sections.push(json!({ "sketch": sk, "profiles": [prof] }));
+    }
 
     let loft_res = run_cmd(
         "solid.loft",
         json!({
-            "sections": [
-                { "sketch": sk_out, "profiles": [prof_out] },
-                { "sketch": sk_in, "profiles": [prof_in] }
-            ],
+            "sections": sections,
             "operation": "new_body",
             "body_name": bname,
         }),
@@ -195,6 +232,8 @@ fn build_single_bevel(
         .to_string();
 
     if bore_dia > 0.0 {
+        let z_out = re * libm::cos(delta_rad);
+        let z_in = ri * libm::cos(delta_rad);
         let z_min = if z_in < z_out { z_in } else { z_out } - 1.0;
         let h = libm::fabs(z_out - z_in) + 2.0;
         let bore_origin = frame.world_point(0.0, 0.0, z_min);
@@ -214,11 +253,17 @@ fn build_single_bevel(
 }
 
 pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
-    let inp: BevelPairInput =
+    let mut inp: BevelPairInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.face_width <= 0.5 {
         return Err(invalid("module", "module and face_width must be positive"));
+    }
+    if inp.sizing_mode == "by_ratio" {
+        if !(0.25..=6.0).contains(&inp.gear_ratio) {
+            return Err(invalid("gear_ratio", "bevel gear_ratio must be between 0.25 and 6.0"));
+        }
+        inp.teeth_2 = (libm::round(inp.teeth_1 as f64 * inp.gear_ratio) as u32).clamp(10, 60);
     }
     if inp.teeth_1 < 10 || inp.teeth_1 > 60 || inp.teeth_2 < 10 || inp.teeth_2 > 60 {
         return Err(invalid("teeth_1", "bevel tooth counts must be between 10 and 60"));
@@ -226,6 +271,12 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
     if !(30.0..=150.0).contains(&inp.shaft_angle) {
         return Err(invalid("shaft_angle", "shaft_angle must be between 30 and 150 deg"));
     }
+    let is_spiral = inp.bevel_type == "spiral";
+    if is_spiral && !(5.0..=45.0).contains(&inp.spiral_angle) {
+        return Err(invalid("spiral_angle", "spiral_angle must be between 5 and 45 deg"));
+    }
+    let hand1 = if inp.hand == "left" { -1.0 } else { 1.0 };
+    let hand2 = -hand1;
 
     let sigma = inp.shaft_angle * core::f64::consts::PI / 180.0;
     let z1 = inp.teeth_1 as f64;
@@ -233,10 +284,9 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
     let delta1 = libm::atan2(libm::sin(sigma), (z2 / z1) + libm::cos(sigma));
     let delta2 = sigma - delta1;
     let re = inp.module * z1 / (2.0 * libm::sin(delta1));
-    let max_fw = 0.45 * re;
+    let max_fw = 0.40 * re;
     let fw = if inp.face_width > max_fw { max_fw } else { inp.face_width };
     let ri = re - fw;
-    let scale = ri / re;
 
     let frame1 = resolve_placement(
         &inp.placement,
@@ -246,7 +296,6 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
         inp.axial_offset,
         inp.layout_angle,
     )?;
-    // Gear 2 shaft sits at shaft_angle from Gear 1 shaft in the local XZ plane, meeting at cone apex (frame1.origin).
     let frame2 = frame1.rotated_y(sigma);
 
     let mut existing = list_existing_params()?;
@@ -259,48 +308,50 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &format!("{p}_sigma"), &fmt_num(inp.shaft_angle), "deg", "Shaft angle", true)?;
     upsert_param(&mut existing, &format!("{p}_cone_dist"), &fmt_num(re), "mm", "Outer cone distance Re", true)?;
 
-    let z1_out = re * libm::cos(delta1);
-    let z1_in = ri * libm::cos(delta1);
-    let z2_out = re * libm::cos(delta2);
-    let z2_in = ri * libm::cos(delta2);
-
     let b1 = build_single_bevel(
         &mut existing_names,
         &format!("{p}_p1"),
         frame1,
-        z1_out,
-        z1_in,
+        re,
+        ri,
+        delta1,
         inp.module,
-        scale,
         inp.teeth_1,
         inp.pressure_angle,
         inp.backlash / 2.0,
         0.0,
+        is_spiral,
+        inp.spiral_angle,
+        hand1,
         inp.bore_1,
         &format!("{p}_BevelPinion"),
     )?;
 
-    // Phase Gear 2 by pi + pi/z2 so its tooth space aligns with Pinion's tooth along the pitch contact line.
     let phase2 = core::f64::consts::PI + core::f64::consts::PI / z2;
     let b2 = build_single_bevel(
         &mut existing_names,
         &format!("{p}_p2"),
         frame2,
-        z2_out,
-        z2_in,
+        re,
+        ri,
+        delta2,
         inp.module,
-        scale,
         inp.teeth_2,
         inp.pressure_angle,
         inp.backlash / 2.0,
         phase2,
+        is_spiral,
+        inp.spiral_angle,
+        hand2,
         inp.bore_2,
         &format!("{p}_BevelGear"),
     )?;
 
     Ok(json!({
         "mode": "gm-bevel-pair",
+        "bevel_type": inp.bevel_type,
         "prefix": p,
+        "ratio": z2 / z1,
         "cone_distance_mm": re,
         "pitch_cone_1_deg": delta1 * 180.0 / core::f64::consts::PI,
         "pitch_cone_2_deg": delta2 * 180.0 / core::f64::consts::PI,

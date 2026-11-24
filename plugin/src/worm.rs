@@ -22,9 +22,11 @@ struct WormDriveInput {
     flip_direction: bool,
     axial_offset: f64,
     prefix: String,
+    sizing_mode: String,
     module: f64,
     worm_starts: u32,
     wheel_teeth: u32,
+    gear_ratio: f64,
     worm_pitch_dia: f64,
     worm_length: f64,
     pressure_angle: f64,
@@ -45,9 +47,11 @@ impl Default for WormDriveInput {
             flip_direction: false,
             axial_offset: 0.0,
             prefix: "wm1".into(),
+            sizing_mode: "by_teeth".into(),
             module: 2.0,
             worm_starts: 1,
             wheel_teeth: 24,
+            gear_ratio: 24.0,
             worm_pitch_dia: 20.0,
             worm_length: 22.0,
             pressure_angle: 20.0,
@@ -61,7 +65,7 @@ impl Default for WormDriveInput {
 }
 
 pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
-    let inp: WormDriveInput =
+    let mut inp: WormDriveInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.worm_length <= 1.0 || inp.wheel_width <= 1.0 {
@@ -69,6 +73,12 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
     }
     if inp.worm_starts < 1 || inp.worm_starts > 4 {
         return Err(invalid("worm_starts", "worm_starts must be between 1 and 4"));
+    }
+    if inp.sizing_mode == "by_ratio" {
+        if !(3.0..=80.0).contains(&inp.gear_ratio) {
+            return Err(invalid("gear_ratio", "worm gear_ratio must be between 3 and 80"));
+        }
+        inp.wheel_teeth = (libm::round(inp.worm_starts as f64 * inp.gear_ratio) as u32).clamp(12, 80);
     }
     if inp.wheel_teeth < 12 || inp.wheel_teeth > 80 {
         return Err(invalid("wheel_teeth", "wheel_teeth must be between 12 and 80"));

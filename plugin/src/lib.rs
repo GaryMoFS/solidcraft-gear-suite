@@ -6,6 +6,7 @@ extern crate alloc;
 mod bevel;
 mod cycloidal;
 mod cylindrical;
+mod geneva;
 mod knurl;
 mod placement;
 mod planetary;
@@ -52,6 +53,7 @@ impl Guest for GearSuitePlugin {
             "gm-bevel-pair" => bevel::run_bevel_pair(&value),
             "gm-worm-drive" => worm::run_worm_drive(&value),
             "gm-knurl" => knurl::run_knurl(&value),
+            "gm-geneva" => geneva::run_geneva(&value),
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
     }

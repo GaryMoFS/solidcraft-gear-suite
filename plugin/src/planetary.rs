@@ -23,9 +23,11 @@ struct PlanetaryInput {
     helix_angle: f64,
     hand: String,
     prefix: String,
+    sizing_mode: String,
     module: f64,
     sun_teeth: u32,
     planet_teeth: u32,
+    target_ratio: f64,
     num_planets: u32,
     pressure_angle: f64,
     face_width: f64,
@@ -47,9 +49,11 @@ impl Default for PlanetaryInput {
             helix_angle: 15.0,
             hand: "right".into(),
             prefix: "pl1".into(),
+            sizing_mode: "by_teeth".into(),
             module: 2.0,
             sun_teeth: 18,
             planet_teeth: 12,
+            target_ratio: 3.333,
             num_planets: 3,
             pressure_angle: 20.0,
             face_width: 10.0,
@@ -62,17 +66,46 @@ impl Default for PlanetaryInput {
 }
 
 pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
-    let inp: PlanetaryInput =
+    let mut inp: PlanetaryInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.face_width <= 0.0 {
         return Err(invalid("module", "module and face_width must be positive"));
     }
-    if inp.sun_teeth < 8 || inp.planet_teeth < 8 {
-        return Err(invalid("sun_teeth", "sun and planet teeth must be at least 8"));
-    }
     if inp.num_planets < 2 || inp.num_planets > 8 {
         return Err(invalid("num_planets", "num_planets must be between 2 and 8"));
+    }
+    if inp.sizing_mode == "by_ratio" {
+        if !(2.5..=12.0).contains(&inp.target_ratio) {
+            return Err(invalid("target_ratio", "planetary ratio (1 + Zr/Zs) must be between 2.5 and 12.0"));
+        }
+        // Ratio R = 1 + (Zs + 2*Zp)/Zs = 2 + 2*Zp/Zs  =>  Zp_ideal = Zs * (R - 2) / 2.
+        // Search nearest (Zs, Zp) satisfying (Zs + Zr) % N == 0, preferring keeping Zs fixed if possible.
+        let zp_ideal = (inp.sun_teeth as f64) * (inp.target_ratio - 2.0) / 2.0;
+        let mut best: Option<(u32, u32, f64)> = None;
+        for dzs in [0i32, 1, -1, 2, -2, 3, -3] {
+            let zs_cand = (inp.sun_teeth as i32 + dzs).clamp(8, 60) as u32;
+            let zp_target = (zs_cand as f64) * (inp.target_ratio - 2.0) / 2.0;
+            for zp_cand in 8u32..=50 {
+                let zr_cand = zs_cand + 2 * zp_cand;
+                if (zs_cand + zr_cand) % inp.num_planets == 0 {
+                    let err = libm::fabs(zp_cand as f64 - zp_target) + 0.5 * libm::fabs(dzs as f64);
+                    if best.is_none_or(|(_, _, b_err)| err < b_err) {
+                        best = Some((zs_cand, zp_cand, err));
+                    }
+                }
+            }
+            if best.is_some() && dzs == 0 && libm::fabs(best.map(|(_, zp, _)| zp as f64).unwrap_or(0.0) - zp_ideal) <= 2.0 {
+                break;
+            }
+        }
+        if let Some((zs, zp, _)) = best {
+            inp.sun_teeth = zs;
+            inp.planet_teeth = zp;
+        }
+    }
+    if inp.sun_teeth < 8 || inp.planet_teeth < 8 {
+        return Err(invalid("sun_teeth", "sun and planet teeth must be at least 8"));
     }
     let ring_teeth = inp.sun_teeth + 2 * inp.planet_teeth;
     if (inp.sun_teeth + ring_teeth) % inp.num_planets != 0 {

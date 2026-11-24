@@ -641,9 +641,11 @@ struct ParallelPairInput {
     hand: String,
     module_system: String,
     prefix: String,
+    sizing_mode: String,
     module: f64,
     teeth_1: u32,
     teeth_2: u32,
+    gear_ratio: f64,
     pressure_angle: f64,
     face_width: f64,
     bore_1: f64,
@@ -666,9 +668,11 @@ impl Default for ParallelPairInput {
             hand: "right".into(),
             module_system: "normal".into(),
             prefix: "p1".into(),
+            sizing_mode: "by_teeth".into(),
             module: 2.0,
             teeth_1: 16,
             teeth_2: 32,
+            gear_ratio: 2.0,
             pressure_angle: 20.0,
             face_width: 10.0,
             bore_1: 6.0,
@@ -680,11 +684,17 @@ impl Default for ParallelPairInput {
 }
 
 pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
-    let inp: ParallelPairInput =
+    let mut inp: ParallelPairInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.face_width <= 0.0 {
         return Err(invalid("module", "module and face_width must be positive"));
+    }
+    if inp.sizing_mode == "by_ratio" {
+        if !(0.2..=12.0).contains(&inp.gear_ratio) {
+            return Err(invalid("gear_ratio", "gear_ratio must be between 0.2 and 12.0"));
+        }
+        inp.teeth_2 = (libm::round(inp.teeth_1 as f64 * inp.gear_ratio) as u32).clamp(8, 100);
     }
     if inp.teeth_1 < 8 || inp.teeth_1 > 100 || inp.teeth_2 < 8 || inp.teeth_2 > 100 {
         return Err(invalid("teeth_1", "tooth counts must be between 8 and 100"));

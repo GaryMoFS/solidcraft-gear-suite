@@ -1,8 +1,8 @@
 {
   "id": "solidcraft-gear-suite",
   "name": "GM Gear Suite",
-  "version": "0.3.0",
-  "description": "Complete Shwivel-style parametric gear & drive suite: External/Internal Cylindrical (Straight, Helical, Herringbone), Parallel Pair, Planetary Set, Rack & Pinion, Cycloidal Drive, Bevel Pair, Worm Drive, and Knurl Maker.",
+  "version": "0.4.0",
+  "description": "Complete Shwivel-style parametric gear & drive suite: Cylindrical (External/Internal, Straight/Helical/Herringbone), Parallel Pair, Planetary, Rack & Pinion, Cycloidal, Straight & Spiral Bevel, Worm Drive, Knurl, and Geneva Mechanism.",
   "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "solidcraft-gear-suite.wasm",
@@ -143,11 +143,11 @@
         ],
         "input_schema": {
           "type": "object",
-          "required": ["tooth_type", "prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
+          "required": ["prefix", "module", "teeth_1", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "tooth_type", "helix_angle", "hand", "module_system",
-            "prefix", "module", "teeth_1", "teeth_2", "pressure_angle", "face_width",
+            "prefix", "sizing_mode", "module", "teeth_1", "teeth_2", "gear_ratio", "pressure_angle", "face_width",
             "bore_1", "bore_2", "backlash", "backlash_mode"
           ],
           "properties": {
@@ -200,9 +200,24 @@
               "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
             },
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "p1" },
+            "sizing_mode": {
+              "type": "string", "title": "Sizing Mode",
+              "oneOf": [
+                { "const": "by_teeth", "title": "By Tooth Counts (Z1 & Z2)" },
+                { "const": "by_ratio", "title": "By Gear Ratio (Z1 & Ratio)" }
+              ],
+              "default": "by_teeth"
+            },
             "module": { "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0 },
             "teeth_1": { "type": "integer", "title": "Pinion Teeth (Z1)", "minimum": 8, "maximum": 100, "default": 16 },
-            "teeth_2": { "type": "integer", "title": "Gear Teeth (Z2)", "minimum": 8, "maximum": 100, "default": 32 },
+            "teeth_2": {
+              "type": "integer", "title": "Gear Teeth (Z2)", "minimum": 8, "maximum": 100, "default": 32,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_teeth" }
+            },
+            "gear_ratio": {
+              "type": "number", "title": "Target Gear Ratio (Z2 / Z1)", "minimum": 0.2, "maximum": 12.0, "default": 2.0,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_ratio" }
+            },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 0.5, "maximum": 500.0, "default": 10.0 },
             "bore_1": { "type": "number", "title": "Pinion Bore (D1)", "unit": "mm", "minimum": 0.0, "maximum": 500.0, "default": 6.0 },
@@ -228,11 +243,11 @@
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "sun_teeth", "planet_teeth", "num_planets", "face_width"],
+          "required": ["prefix", "module", "sun_teeth", "num_planets", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
             "tooth_type", "helix_angle", "hand",
-            "prefix", "module", "sun_teeth", "planet_teeth", "num_planets", "pressure_angle",
+            "prefix", "sizing_mode", "module", "sun_teeth", "planet_teeth", "target_ratio", "num_planets", "pressure_angle",
             "face_width", "sun_bore", "planet_bore", "ring_wall", "backlash"
           ],
           "properties": {
@@ -275,9 +290,24 @@
               "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
             },
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "pl1" },
+            "sizing_mode": {
+              "type": "string", "title": "Sizing Mode",
+              "oneOf": [
+                { "const": "by_teeth", "title": "By Tooth Counts (Sun & Planet)" },
+                { "const": "by_ratio", "title": "By Target Ratio (Auto-Solve Valid Teeth)" }
+              ],
+              "default": "by_teeth"
+            },
             "module": { "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0 },
             "sun_teeth": { "type": "integer", "title": "Sun Teeth", "minimum": 8, "maximum": 60, "default": 18 },
-            "planet_teeth": { "type": "integer", "title": "Planet Teeth", "minimum": 8, "maximum": 40, "default": 12 },
+            "planet_teeth": {
+              "type": "integer", "title": "Planet Teeth", "minimum": 8, "maximum": 40, "default": 12,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_teeth" }
+            },
+            "target_ratio": {
+              "type": "number", "title": "Target Reduction Ratio (1 + Zr/Zs)", "minimum": 2.5, "maximum": 12.0, "default": 4.0,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_ratio" }
+            },
             "num_planets": { "type": "integer", "title": "Number of Planets", "minimum": 2, "maximum": 8, "default": 3 },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 0.5, "maximum": 500.0, "default": 10.0 },
@@ -297,10 +327,10 @@
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "pinion_teeth", "rack_teeth", "face_width"],
+          "required": ["prefix", "module", "pinion_teeth", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
-            "prefix", "module", "pinion_teeth", "rack_teeth", "pressure_angle", "face_width",
+            "prefix", "module", "pinion_teeth", "rack_sizing", "rack_teeth", "rack_length", "pressure_angle", "face_width",
             "rack_backing", "pinion_bore", "backlash"
           ],
           "properties": {
@@ -324,7 +354,22 @@
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "rp1" },
             "module": { "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0 },
             "pinion_teeth": { "type": "integer", "title": "Pinion Teeth", "minimum": 8, "maximum": 80, "default": 16 },
-            "rack_teeth": { "type": "integer", "title": "Rack Teeth", "minimum": 3, "maximum": 100, "default": 12 },
+            "rack_sizing": {
+              "type": "string", "title": "Rack Sizing",
+              "oneOf": [
+                { "const": "by_teeth", "title": "By Tooth Count" },
+                { "const": "by_length", "title": "By Rack Length (mm)" }
+              ],
+              "default": "by_teeth"
+            },
+            "rack_teeth": {
+              "type": "integer", "title": "Rack Teeth", "minimum": 3, "maximum": 120, "default": 12,
+              "x-solidcraft-visible-when": { "field": "rack_sizing", "eq": "by_teeth" }
+            },
+            "rack_length": {
+              "type": "number", "title": "Rack Length", "unit": "mm", "minimum": 10.0, "maximum": 2000.0, "default": 80.0,
+              "x-solidcraft-visible-when": { "field": "rack_sizing", "eq": "by_length" }
+            },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 0.5, "maximum": 500.0, "default": 10.0 },
             "rack_backing": { "type": "number", "title": "Rack Backing Thickness", "unit": "mm", "minimum": 1.0, "maximum": 200.0, "default": 8.0 },
@@ -388,10 +433,11 @@
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "teeth_1", "teeth_2", "shaft_angle", "face_width"],
+          "required": ["prefix", "module", "teeth_1", "shaft_angle", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
-            "prefix", "module", "teeth_1", "teeth_2", "shaft_angle", "pressure_angle",
+            "bevel_type", "spiral_angle", "hand",
+            "prefix", "sizing_mode", "module", "teeth_1", "teeth_2", "gear_ratio", "shaft_angle", "pressure_angle",
             "face_width", "bore_1", "bore_2", "backlash"
           ],
           "properties": {
@@ -413,9 +459,45 @@
             "flip_direction": { "type": "boolean", "title": "Flip Direction", "default": false },
             "axial_offset": { "type": "number", "title": "Axial Offset", "unit": "mm", "minimum": -1000.0, "maximum": 1000.0, "default": 0.0 },
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "bv1" },
+            "bevel_type": {
+              "type": "string", "title": "Bevel Tooth Type",
+              "oneOf": [
+                { "const": "straight", "title": "Straight Bevel" },
+                { "const": "spiral", "title": "Spiral Bevel" }
+              ],
+              "default": "straight"
+            },
+            "spiral_angle": {
+              "type": "number", "title": "Spiral Angle", "unit": "deg", "minimum": 5.0, "maximum": 45.0, "default": 30.0,
+              "x-solidcraft-visible-when": { "field": "bevel_type", "eq": "spiral" }
+            },
+            "hand": {
+              "type": "string", "title": "Pinion Spiral Hand",
+              "oneOf": [
+                { "const": "right", "title": "Right-Hand (Pinion RH / Gear LH)" },
+                { "const": "left", "title": "Left-Hand (Pinion LH / Gear RH)" }
+              ],
+              "default": "right",
+              "x-solidcraft-visible-when": { "field": "bevel_type", "eq": "spiral" }
+            },
+            "sizing_mode": {
+              "type": "string", "title": "Sizing Mode",
+              "oneOf": [
+                { "const": "by_teeth", "title": "By Tooth Counts (Z1 & Z2)" },
+                { "const": "by_ratio", "title": "By Gear Ratio (Z1 & Ratio)" }
+              ],
+              "default": "by_teeth"
+            },
             "module": { "type": "number", "title": "Outer Module", "unit": "mm", "minimum": 0.5, "maximum": 50.0, "default": 2.0 },
             "teeth_1": { "type": "integer", "title": "Pinion Teeth (Z1)", "minimum": 10, "maximum": 60, "default": 16 },
-            "teeth_2": { "type": "integer", "title": "Gear Teeth (Z2)", "minimum": 10, "maximum": 60, "default": 24 },
+            "teeth_2": {
+              "type": "integer", "title": "Gear Teeth (Z2)", "minimum": 10, "maximum": 60, "default": 24,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_teeth" }
+            },
+            "gear_ratio": {
+              "type": "number", "title": "Target Gear Ratio (Z2 / Z1)", "minimum": 0.25, "maximum": 6.0, "default": 1.5,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_ratio" }
+            },
             "shaft_angle": { "type": "number", "title": "Shaft Angle", "unit": "deg", "minimum": 30.0, "maximum": 150.0, "default": 90.0 },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 1.0, "maximum": 200.0, "default": 10.0 },
@@ -434,10 +516,10 @@
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "worm_starts", "wheel_teeth", "worm_pitch_dia", "worm_length", "wheel_width"],
+          "required": ["prefix", "module", "worm_starts", "worm_pitch_dia", "worm_length", "wheel_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
-            "prefix", "module", "worm_starts", "wheel_teeth", "worm_pitch_dia", "worm_length",
+            "prefix", "sizing_mode", "module", "worm_starts", "wheel_teeth", "gear_ratio", "worm_pitch_dia", "worm_length",
             "pressure_angle", "wheel_width", "worm_bore", "wheel_bore", "hand", "backlash"
           ],
           "properties": {
@@ -459,9 +541,24 @@
             "flip_direction": { "type": "boolean", "title": "Flip Direction", "default": false },
             "axial_offset": { "type": "number", "title": "Axial Offset", "unit": "mm", "minimum": -1000.0, "maximum": 1000.0, "default": 0.0 },
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "wm1" },
+            "sizing_mode": {
+              "type": "string", "title": "Sizing Mode",
+              "oneOf": [
+                { "const": "by_teeth", "title": "By Wheel Teeth (Z2)" },
+                { "const": "by_ratio", "title": "By Reduction Ratio (Z2 / Z1)" }
+              ],
+              "default": "by_teeth"
+            },
             "module": { "type": "number", "title": "Axial Module", "unit": "mm", "minimum": 0.5, "maximum": 25.0, "default": 2.0 },
             "worm_starts": { "type": "integer", "title": "Worm Starts (Z1)", "minimum": 1, "maximum": 4, "default": 1 },
-            "wheel_teeth": { "type": "integer", "title": "Wheel Teeth (Z2)", "minimum": 12, "maximum": 80, "default": 24 },
+            "wheel_teeth": {
+              "type": "integer", "title": "Wheel Teeth (Z2)", "minimum": 12, "maximum": 80, "default": 24,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_teeth" }
+            },
+            "gear_ratio": {
+              "type": "number", "title": "Target Reduction Ratio", "minimum": 3.0, "maximum": 80.0, "default": 24.0,
+              "x-solidcraft-visible-when": { "field": "sizing_mode", "eq": "by_ratio" }
+            },
             "worm_pitch_dia": { "type": "number", "title": "Worm Pitch Diameter", "unit": "mm", "minimum": 6.0, "maximum": 300.0, "default": 20.0 },
             "worm_length": { "type": "number", "title": "Worm Length", "unit": "mm", "minimum": 5.0, "maximum": 500.0, "default": 22.0 },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
@@ -531,6 +628,51 @@
             },
             "bore_diameter": { "type": "number", "title": "Bore Diameter", "unit": "mm", "minimum": 0.0, "maximum": 400.0, "default": 0.0 },
             "body_name": { "type": "string", "title": "Body Name", "default": "GM_Knurl" }
+          }
+        }
+      },
+      {
+        "name": "gm-geneva",
+        "effect": "edit",
+        "slots": [
+          { "kind": "menu", "name": "GM Geneva Mechanism..." },
+          { "kind": "ribbon", "name": "GM Geneva" }
+        ],
+        "input_schema": {
+          "type": "object",
+          "required": ["prefix", "num_slots", "center_distance", "pin_dia", "thickness"],
+          "x-solidcraft-order": [
+            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "prefix", "num_slots", "center_distance", "pin_dia", "thickness",
+            "clearance", "wheel_bore", "driver_bore", "include_driver"
+          ],
+          "properties": {
+            "placement": {
+              "type": "array", "title": "Wheel Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
+              "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
+            },
+            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
+            "base_plane": {
+              "type": "string", "title": "Base Plane (if no pick)",
+              "oneOf": [
+                { "const": "XY", "title": "XY Plane (Z Axis)" },
+                { "const": "XZ", "title": "XZ Plane (Y Axis)" },
+                { "const": "YZ", "title": "YZ Plane (X Axis)" }
+              ],
+              "default": "XY"
+            },
+            "layout_angle": { "type": "number", "title": "Driver Layout Angle", "unit": "deg", "minimum": -360.0, "maximum": 360.0, "default": 0.0 },
+            "flip_direction": { "type": "boolean", "title": "Flip Direction", "default": false },
+            "axial_offset": { "type": "number", "title": "Axial Offset", "unit": "mm", "minimum": -1000.0, "maximum": 1000.0, "default": 0.0 },
+            "prefix": { "type": "string", "title": "Parameter Prefix", "default": "gen1" },
+            "num_slots": { "type": "integer", "title": "Number of Slots (Stations)", "minimum": 3, "maximum": 12, "default": 6 },
+            "center_distance": { "type": "number", "title": "Center Distance", "unit": "mm", "minimum": 15.0, "maximum": 1000.0, "default": 60.0 },
+            "pin_dia": { "type": "number", "title": "Drive Pin Diameter", "unit": "mm", "minimum": 1.0, "maximum": 100.0, "default": 6.0 },
+            "thickness": { "type": "number", "title": "Wheel Thickness", "unit": "mm", "minimum": 1.0, "maximum": 200.0, "default": 8.0 },
+            "clearance": { "type": "number", "title": "Slot & Locking Clearance", "unit": "mm", "minimum": 0.0, "maximum": 5.0, "default": 0.2 },
+            "wheel_bore": { "type": "number", "title": "Wheel Bore Diameter", "unit": "mm", "minimum": 0.0, "maximum": 400.0, "default": 10.0 },
+            "driver_bore": { "type": "number", "title": "Driver Bore Diameter", "unit": "mm", "minimum": 0.0, "maximum": 400.0, "default": 8.0 },
+            "include_driver": { "type": "boolean", "title": "Generate Drive Crank & Locking Hub", "default": true }
           }
         }
       }
