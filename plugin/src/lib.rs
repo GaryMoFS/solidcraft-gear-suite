@@ -626,6 +626,38 @@ fn extract_curve_endpoints(res: &Value, label: &str) -> Result<(String, String),
     Ok((first.to_string(), last.to_string()))
 }
 
+fn extract_created_curve_id(res: &Value, label: &str) -> Result<String, PluginError> {
+    res.get("created")
+        .and_then(|c| c.get("curves"))
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| PluginError::Trap(format!("{label}: missing created.curves[0]")))
+}
+
+fn pick_outer_profile_index(sketch_name: &str) -> Result<u64, PluginError> {
+    let insp = run_cmd("sketch.inspect", json!({ "sketch": sketch_name }))?;
+    let profiles = insp
+        .get("profiles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| PluginError::Trap(format!("{sketch_name}: no closed profiles found")))?;
+    if profiles.is_empty() {
+        return Err(PluginError::Trap(format!("{sketch_name}: gear profile did not close")));
+    }
+    // The gear body is the profile with the largest area (and holes when bore > 0).
+    let best = profiles
+        .iter()
+        .max_by(|a, b| {
+            let aa = a.get("area_mm2").and_then(Value::as_f64).unwrap_or(0.0);
+            let ba = b.get("area_mm2").and_then(Value::as_f64).unwrap_or(0.0);
+            aa.total_cmp(&ba)
+        })
+        .and_then(|p| p.get("index").and_then(Value::as_u64))
+        .unwrap_or(0);
+    Ok(best)
+}
+
 fn build_parametric_gear(
     existing: &mut BTreeSet<String>,
     spec: &GearSpec<'_>,
@@ -648,11 +680,14 @@ fn build_parametric_gear(
     let t_end = format!("{gp}_t_end");
     let inv_a = format!("{gp}_inv_a");
     let psi = format!("{gp}_psi");
+    let hp = format!("{gp}_hp");
 
     // Validate basic geometry against numeric values before issuing CAD commands.
     let pitch_dia = spec.mt_val * spec.teeth_val as f64;
     let outer_dia = pitch_dia + 2.0 * spec.m_val * (1.0 + spec.shift_val);
     let root_dia = pitch_dia - 2.0 * spec.m_val * (1.25 - spec.shift_val);
+    let at_rad_approx = 20.0 * core::f64::consts::PI / 180.0;
+    let base_dia_approx = pitch_dia * libm::cos(at_rad_approx);
     if root_dia <= 0.5 {
         return Err(invalid("teeth", "root diameter is too small for this module/shift"));
     }
@@ -701,6 +736,7 @@ fn build_parametric_gear(
         "Half tooth angular width on base circle (rad)",
         false,
     )?;
+    upsert_param(existing, &hp, &format!("pi / {z}"), "", "Half tooth pitch angle (rad)", false)?;
 
     let is_herringbone = spec.tooth_kind == ToothKind::Herringbone;
     let build_h = if is_herringbone {
@@ -714,27 +750,7 @@ fn build_parametric_gear(
     let base_origin = spec.frame.origin_json(spec.offset_x_param);
     let axis_vec = json!([spec.frame.z_dir[0], spec.frame.z_dir[1], spec.frame.z_dir[2]]);
 
-    // 1. Root cylinder hub (parametric radius, height, axis & center).
-    let hub_res = run_cmd(
-        "solid.cylinder",
-        json!({
-            "radius": rf,
-            "height": &build_h,
-            "base": base_origin,
-            "axis": axis_vec,
-            "operation": "new_body",
-            "body_name": spec.body_name,
-        }),
-    )?;
-    let actual_body = hub_res
-        .get("created_bodies")
-        .and_then(Value::as_array)
-        .and_then(|a| a.first())
-        .and_then(Value::as_str)
-        .unwrap_or(spec.body_name)
-        .to_string();
-
-    // 2. Parametric single-tooth sketch centered on gear axis in the placement frame.
+    // 1. Complete 2D gear cross-section sketch (1 tooth patterned in 2D via sketch.pattern.circular + bore).
     let plane_arg = json!({
         "origin": base_origin,
         "x_dir": [spec.frame.x_dir[0], spec.frame.x_dir[1], spec.frame.x_dir[2]],
@@ -748,8 +764,22 @@ fn build_parametric_gear(
         }),
     )?;
 
-    let (x_bot, y_bot, x_top, y_top, tip_mid) = match spec.phi_param {
+    // Draw bore circle BEFORE circular pattern so the sketch solver stays instant.
+    if let Some(bore_p) = spec.bore_param {
+        if spec.bore_val > 0.0 {
+            run_cmd(
+                "sketch.circle.center",
+                json!({
+                    "center": [0.0, 0.0],
+                    "diameter": bore_p,
+                }),
+            )?;
+        }
+    }
+
+    let (phi_prefix, x_bot, y_bot, x_top, y_top, tip_mid) = match spec.phi_param {
         Some(phi) => (
+            format!("{phi} + "),
             format!("{rb} * (cos({phi} - {psi} + t) + t * sin({phi} - {psi} + t))"),
             format!("{rb} * (sin({phi} - {psi} + t) - t * cos({phi} - {psi} + t))"),
             format!("{rb} * (cos({phi} + {psi} - t) - t * sin({phi} + {psi} - t))"),
@@ -760,6 +790,7 @@ fn build_parametric_gear(
             ]),
         ),
         None => (
+            String::new(),
             format!("{rb} * (cos(t - {psi}) + t * sin(t - {psi}))"),
             format!("{rb} * (sin(t - {psi}) - t * cos(t - {psi}))"),
             format!("{rb} * (cos({psi} - t) - t * sin({psi} - t))"),
@@ -775,9 +806,10 @@ fn build_parametric_gear(
             "y": y_bot,
             "start": t_start,
             "end": t_end,
-            "tolerance": 0.01,
+            "tolerance": 0.02,
         }),
     )?;
+    let bot_curve = extract_created_curve_id(&bot_res, "bottom flank")?;
     let (bot_start, bot_end) = extract_curve_endpoints(&bot_res, "bottom flank")?;
 
     let top_res = run_cmd(
@@ -787,27 +819,14 @@ fn build_parametric_gear(
             "y": y_top,
             "start": t_start,
             "end": t_end,
-            "tolerance": 0.01,
+            "tolerance": 0.02,
         }),
     )?;
+    let top_curve = extract_created_curve_id(&top_res, "top flank")?;
     let (top_start, top_end) = extract_curve_endpoints(&top_res, "top flank")?;
 
-    // Close wedge at center [0, 0] (always inside root cylinder) and along tip arc.
-    run_cmd(
-        "sketch.line",
-        json!({
-            "points": [[0.0, 0.0], bot_start],
-            "connect": true,
-        }),
-    )?;
-    run_cmd(
-        "sketch.line",
-        json!({
-            "points": [[0.0, 0.0], top_start],
-            "connect": true,
-        }),
-    )?;
-    run_cmd(
+    // Tip arc connecting the two involute tips.
+    let tip_res = run_cmd(
         "sketch.arc.three_point",
         json!({
             "start": bot_end,
@@ -816,25 +835,108 @@ fn build_parametric_gear(
             "connect": true,
         }),
     )?;
+    let tip_curve = extract_created_curve_id(&tip_res, "tip arc")?;
+
+    // Root circle points at +/- half-pitch (phi +/- pi/z) and root flank join.
+    let ang = |expr: String| format!("({phi_prefix}{expr}) * 1 rad");
+    let pt_on_rf = |a_expr: String| -> Value {
+        json!([
+            format!("{rf} * cos({a_expr})"),
+            format!("{rf} * sin({a_expr})"),
+        ])
+    };
+    let p_hp_neg = pt_on_rf(ang(format!("-{hp}")));
+    let p_hp_pos = pt_on_rf(ang(hp.clone()));
+
+    let mut pattern_entities: Vec<String> = Vec::new();
+    pattern_entities.push(bot_curve);
+    pattern_entities.push(top_curve);
+    pattern_entities.push(tip_curve);
+
+    let needs_radial = root_dia < base_dia_approx - 1e-3;
+    if needs_radial {
+        let p_psi_neg = pt_on_rf(ang(format!("-{psi}")));
+        let p_psi_pos = pt_on_rf(ang(psi.clone()));
+        let p_mid_neg = pt_on_rf(ang(format!("-0.5 * ({hp} + {psi})")));
+        let p_mid_pos = pt_on_rf(ang(format!("0.5 * ({hp} + {psi})")));
+
+        let a_bot = run_cmd(
+            "sketch.arc.three_point",
+            json!({ "start": p_hp_neg, "through": p_mid_neg, "end": p_psi_neg, "connect": true }),
+        )?;
+        let l_bot = run_cmd(
+            "sketch.line",
+            json!({ "points": [p_psi_neg, bot_start], "connect": true }),
+        )?;
+        let l_top = run_cmd(
+            "sketch.line",
+            json!({ "points": [top_start, p_psi_pos], "connect": true }),
+        )?;
+        let a_top = run_cmd(
+            "sketch.arc.three_point",
+            json!({ "start": p_psi_pos, "through": p_mid_pos, "end": p_hp_pos, "connect": true }),
+        )?;
+        pattern_entities.push(extract_created_curve_id(&a_bot, "bot root arc")?);
+        pattern_entities.push(extract_created_curve_id(&l_bot, "bot root line")?);
+        pattern_entities.push(extract_created_curve_id(&l_top, "top root line")?);
+        pattern_entities.push(extract_created_curve_id(&a_top, "top root arc")?);
+    } else {
+        // Involute starts directly on root circle rf at angle phi -/+ (psi - inv(t_start)).
+        let psi_f = format!("{gp}_psi_f");
+        upsert_param(
+            existing,
+            &psi_f,
+            &format!("{psi} - ({t_start} - atan({t_start}) / 1 rad)"),
+            "",
+            "Half tooth angular width on root circle (rad)",
+            false,
+        )?;
+        let p_mid_neg = pt_on_rf(ang(format!("-0.5 * ({hp} + {psi_f})")));
+        let p_mid_pos = pt_on_rf(ang(format!("0.5 * ({hp} + {psi_f})")));
+        let a_bot = run_cmd(
+            "sketch.arc.three_point",
+            json!({ "start": p_hp_neg, "through": p_mid_neg, "end": bot_start, "connect": true }),
+        )?;
+        let a_top = run_cmd(
+            "sketch.arc.three_point",
+            json!({ "start": top_start, "through": p_mid_pos, "end": p_hp_pos, "connect": true }),
+        )?;
+        pattern_entities.push(extract_created_curve_id(&a_bot, "bot root arc")?);
+        pattern_entities.push(extract_created_curve_id(&a_top, "top root arc")?);
+    }
+
+    // Parametric 2D circular pattern of all teeth around [0, 0] (ZERO 3D tooth booleans!).
+    run_cmd(
+        "sketch.pattern.circular",
+        json!({
+            "entities": pattern_entities,
+            "center": [0.0, 0.0],
+            "count": z,
+            "angle": "360 deg",
+        }),
+    )?;
     run_cmd("sketch.finish", json!({}))?;
 
-    // 3. Build single tooth (extrude for straight, twisted sweep for helical/herringbone).
-    let tooth_name = format!("{gp}_Tooth");
-    let tooth_feature = if spec.tooth_kind == ToothKind::Straight {
+    let gear_profile = pick_outer_profile_index(spec.sketch_name)?;
+
+    // 2. Build complete gear in ONE feature (single extrude for straight, single twisted sweep for helical/herringbone).
+    let actual_body = if spec.tooth_kind == ToothKind::Straight {
         let ext_res = run_cmd(
             "solid.extrude",
             json!({
                 "sketch": spec.sketch_name,
+                "profiles": [gear_profile],
                 "distance": &build_h,
-                "operation": "join",
-                "targets": [&actual_body],
-                "name": tooth_name,
+                "operation": "new_body",
+                "body_name": spec.body_name,
             }),
         )?;
         ext_res
-            .get("name")
+            .get("created_bodies")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
             .and_then(Value::as_str)
-            .unwrap_or(&tooth_name)
+            .unwrap_or(spec.body_name)
             .to_string()
     } else {
         let beta = spec.beta_param.unwrap_or("15 deg");
@@ -867,67 +969,31 @@ fn build_parametric_gear(
                 "points": [[0.0, 0.0], [0.0, &build_h]],
             }),
         )?;
-        let path_curve = line_res
-            .get("created")
-            .and_then(|c| c.get("curves"))
-            .and_then(Value::as_array)
-            .and_then(|a| a.first())
-            .and_then(Value::as_str)
-            .ok_or_else(|| PluginError::Trap("helical axis path sketch.line missing curve id".into()))?
-            .to_string();
+        let path_curve = extract_created_curve_id(&line_res, "helical axis path")?;
         run_cmd("sketch.finish", json!({}))?;
 
         let sweep_res = run_cmd(
             "solid.sweep",
             json!({
                 "sketch": spec.sketch_name,
+                "profiles": [gear_profile],
                 "path_sketch": spec.path_sketch_name,
                 "path": [path_curve],
                 "twist": twist_p,
-                "operation": "join",
-                "targets": [&actual_body],
-                "name": tooth_name,
+                "operation": "new_body",
+                "body_name": spec.body_name,
             }),
         )?;
         sweep_res
-            .get("name")
+            .get("created_bodies")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
             .and_then(Value::as_str)
-            .unwrap_or(&tooth_name)
+            .unwrap_or(spec.body_name)
             .to_string()
     };
 
-    // 4. Parametric circular pattern of the tooth around gear axis.
-    run_cmd(
-        "solid.pattern.circular",
-        json!({
-            "features": [tooth_feature],
-            "axis": {
-                "origin": base_origin,
-                "dir": axis_vec,
-            },
-            "count": z,
-            "angle": "360 deg",
-        }),
-    )?;
-
-    // 5. Optional parametric bore cut.
-    if let Some(bore_p) = spec.bore_param {
-        if spec.bore_val > 0.0 {
-            run_cmd(
-                "solid.cylinder",
-                json!({
-                    "diameter": bore_p,
-                    "height": &build_h,
-                    "base": base_origin,
-                    "axis": axis_vec,
-                    "operation": "cut",
-                    "targets": [&actual_body],
-                }),
-            )?;
-        }
-    }
-
-    // 6. For herringbone, mirror bottom half across live midplane (z = fw / 2) and combine!
+    // 3. For herringbone, mirror bottom half across live midplane (z = fw / 2) and combine!
     if is_herringbone {
         let mid_origin = spec.frame.origin_offset_json(spec.offset_x_param, Some(&build_h));
         run_cmd(

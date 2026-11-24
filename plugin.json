@@ -17,15 +17,15 @@
       "parameters.add",
       "parameters.change",
       "sketch.create",
+      "sketch.circle.center",
       "sketch.equation_curve",
       "sketch.line",
       "sketch.arc.three_point",
+      "sketch.pattern.circular",
       "sketch.finish",
-      "solid.cylinder",
       "solid.extrude",
       "solid.sweep",
-      "solid.mirror",
-      "solid.pattern.circular"
+      "solid.mirror"
     ],
     "limits": {
       "fuel": 150000000,
