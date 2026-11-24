@@ -8,6 +8,7 @@
     "module": "solidcraft-gear-suite.wasm",
     "commands": [
       "document.inspect",
+      "selection.get",
       "inspect.measure",
       "model.faces",
       "model.edges",

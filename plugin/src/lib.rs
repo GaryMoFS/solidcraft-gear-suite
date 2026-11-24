@@ -393,17 +393,27 @@ fn resolve_placement(
     layout_angle_deg: f64,
 ) -> Result<PlacementFrame, PluginError> {
     let mut frame = PlacementFrame::from_base_plane(base_plane);
-    if let Some(pick) = picks.first() {
+    let active_pick = if let Some(p) = picks.first() {
+        Some(p.clone())
+    } else if axis_name.trim().is_empty() {
+        // Auto-gather a pre-selected Axis, Face, Edge, or Sketch point from the viewport/Browser.
+        run_cmd("selection.get", json!({ "detail": true }))
+            .ok()
+            .and_then(|r| r.get("items").and_then(Value::as_array).and_then(|a| a.first()).cloned())
+    } else {
+        None
+    };
+    if let Some(pick) = active_pick.as_ref() {
         let ptype = pick.get("type").and_then(Value::as_str).unwrap_or("");
         match ptype {
             "axis" => {
-                if let Some(name) = pick.get("name").and_then(Value::as_str) {
-                    frame = resolve_axis_by_name(name)?;
-                } else if let (Some(o), Some(d)) = (
+                if let (Some(o), Some(d)) = (
                     pick.get("origin").and_then(parse_vec3),
                     pick.get("direction").and_then(parse_vec3),
                 ) {
                     frame = PlacementFrame::from_axis(o, d);
+                } else if let Some(name) = pick.get("name").and_then(Value::as_str) {
+                    frame = resolve_axis_by_name(name)?;
                 }
             }
             "face" => {
