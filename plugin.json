@@ -1,0 +1,229 @@
+{
+  "id": "solidcraft-gear-suite",
+  "name": "Gear Suite",
+  "version": "0.1.0",
+  "description": "Parametric equation-driven gear suite: involute spur gears and meshing parallel gear pairs that auto-rebuild from SolidCraft Design Parameters.",
+  "capabilities": ["commands@0.2"],
+  "runtime": {
+    "module": "solidcraft-gear-suite.wasm",
+    "commands": [
+      "parameters.list",
+      "parameters.add",
+      "parameters.change",
+      "sketch.create",
+      "sketch.equation_curve",
+      "sketch.line",
+      "sketch.arc.three_point",
+      "sketch.finish",
+      "solid.cylinder",
+      "solid.extrude",
+      "solid.pattern.circular"
+    ],
+    "limits": {
+      "fuel": 100000000,
+      "memory_mib": 64,
+      "deadline_ms": 30000
+    },
+    "entries": [
+      {
+        "name": "parametric-spur-gear",
+        "effect": "edit",
+        "slots": [
+          { "kind": "menu", "name": "Parametric Spur Gear..." },
+          { "kind": "ribbon", "name": "Spur Gear" }
+        ],
+        "input_schema": {
+          "type": "object",
+          "required": ["prefix", "module", "teeth", "face_width", "pressure_angle"],
+          "x-solidcraft-order": [
+            "prefix",
+            "module",
+            "teeth",
+            "pressure_angle",
+            "face_width",
+            "bore_diameter",
+            "profile_shift",
+            "backlash",
+            "body_name"
+          ],
+          "properties": {
+            "prefix": {
+              "type": "string",
+              "title": "Parameter Prefix",
+              "description": "Prefix for created Design Parameters (e.g. g1 -> g1_m, g1_z, g1_fw).",
+              "default": "g1"
+            },
+            "module": {
+              "type": "number",
+              "title": "Module",
+              "description": "Gear module m (pitch diameter = m * z).",
+              "unit": "mm",
+              "minimum": 0.25,
+              "maximum": 50.0,
+              "default": 2.0
+            },
+            "teeth": {
+              "type": "integer",
+              "title": "Teeth",
+              "description": "Number of teeth z.",
+              "minimum": 8,
+              "maximum": 80,
+              "default": 20
+            },
+            "pressure_angle": {
+              "type": "number",
+              "title": "Pressure Angle",
+              "description": "Tooth flank pressure angle.",
+              "unit": "deg",
+              "minimum": 14.5,
+              "maximum": 25.0,
+              "default": 20.0
+            },
+            "face_width": {
+              "type": "number",
+              "title": "Face Width",
+              "description": "Gear thickness along Z.",
+              "unit": "mm",
+              "minimum": 0.5,
+              "maximum": 500.0,
+              "default": 10.0
+            },
+            "bore_diameter": {
+              "type": "number",
+              "title": "Bore Diameter",
+              "description": "Center bore diameter (0 for solid hub).",
+              "unit": "mm",
+              "minimum": 0.0,
+              "maximum": 500.0,
+              "default": 8.0
+            },
+            "profile_shift": {
+              "type": "number",
+              "title": "Profile Shift",
+              "description": "Addendum modification coefficient x.",
+              "minimum": -0.5,
+              "maximum": 1.0,
+              "default": 0.0
+            },
+            "backlash": {
+              "type": "number",
+              "title": "Backlash",
+              "description": "Circumferential tooth thinning allowance on the pitch circle.",
+              "unit": "mm",
+              "minimum": 0.0,
+              "maximum": 5.0,
+              "default": 0.05
+            },
+            "body_name": {
+              "type": "string",
+              "title": "Body Name",
+              "description": "Optional name for the generated gear body.",
+              "default": "SpurGear"
+            }
+          }
+        }
+      },
+      {
+        "name": "parametric-parallel-pair",
+        "effect": "edit",
+        "slots": [
+          { "kind": "menu", "name": "Parametric Parallel Gear Pair..." },
+          { "kind": "ribbon", "name": "Parallel Pair" }
+        ],
+        "input_schema": {
+          "type": "object",
+          "required": ["prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
+          "x-solidcraft-order": [
+            "prefix",
+            "module",
+            "teeth_1",
+            "teeth_2",
+            "pressure_angle",
+            "face_width",
+            "bore_1",
+            "bore_2",
+            "backlash"
+          ],
+          "properties": {
+            "prefix": {
+              "type": "string",
+              "title": "Parameter Prefix",
+              "description": "Prefix for shared pair parameters (e.g. p1 -> p1_m, p1_z1, p1_z2, p1_cd, p1_ratio).",
+              "default": "p1"
+            },
+            "module": {
+              "type": "number",
+              "title": "Module",
+              "description": "Shared module m for both gears.",
+              "unit": "mm",
+              "minimum": 0.25,
+              "maximum": 50.0,
+              "default": 2.0
+            },
+            "teeth_1": {
+              "type": "integer",
+              "title": "Pinion Teeth (Z1)",
+              "description": "Number of teeth on Gear 1 (at origin).",
+              "minimum": 8,
+              "maximum": 80,
+              "default": 16
+            },
+            "teeth_2": {
+              "type": "integer",
+              "title": "Gear Teeth (Z2)",
+              "description": "Number of teeth on Gear 2 (at center distance along +X).",
+              "minimum": 8,
+              "maximum": 80,
+              "default": 32
+            },
+            "pressure_angle": {
+              "type": "number",
+              "title": "Pressure Angle",
+              "description": "Shared pressure angle.",
+              "unit": "deg",
+              "minimum": 14.5,
+              "maximum": 25.0,
+              "default": 20.0
+            },
+            "face_width": {
+              "type": "number",
+              "title": "Face Width",
+              "description": "Shared gear thickness along Z.",
+              "unit": "mm",
+              "minimum": 0.5,
+              "maximum": 500.0,
+              "default": 10.0
+            },
+            "bore_1": {
+              "type": "number",
+              "title": "Pinion Bore (D1)",
+              "description": "Center bore diameter for Gear 1 (0 for none).",
+              "unit": "mm",
+              "minimum": 0.0,
+              "maximum": 500.0,
+              "default": 6.0
+            },
+            "bore_2": {
+              "type": "number",
+              "title": "Gear Bore (D2)",
+              "description": "Center bore diameter for Gear 2 (0 for none).",
+              "unit": "mm",
+              "minimum": 0.0,
+              "maximum": 500.0,
+              "default": 10.0
+            },
+            "backlash": {
+              "type": "number",
+              "title": "Backlash",
+              "description": "Circumferential backlash applied per gear.",
+              "unit": "mm",
+              "minimum": 0.0,
+              "maximum": 5.0,
+              "default": 0.05
+            }
+          }
+        }
+      }
+    ]
+  }
+}
