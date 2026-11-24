@@ -1,0 +1,6 @@
+/plugin/target/
+/packager/target/
+/dist/
+*.sc
+*.step
+*.stl
