@@ -416,6 +416,25 @@ fn resolve_placement(
                     frame = resolve_axis_by_name(name)?;
                 }
             }
+            "plane" => {
+                if let Some(name) = pick.get("name").and_then(Value::as_str) {
+                    match name {
+                        "XY" | "XZ" | "YZ" => frame = PlacementFrame::from_base_plane(name),
+                        other => {
+                            if let Ok(res) = run_cmd(
+                                "inspect.measure",
+                                json!({ "items": [{ "type": "plane", "name": other }] }),
+                            ) {
+                                if let Some(item) = res.get("items").and_then(Value::as_array).and_then(|a| a.first()) {
+                                    let o = item.get("origin").and_then(parse_vec3).unwrap_or([0.0, 0.0, 0.0]);
+                                    let n = item.get("normal").and_then(parse_vec3).unwrap_or([0.0, 0.0, 1.0]);
+                                    frame = PlacementFrame::from_axis(o, n);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             "face" => {
                 let body = pick
                     .get("body")

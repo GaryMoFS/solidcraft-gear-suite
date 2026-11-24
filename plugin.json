@@ -64,7 +64,7 @@
               "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the gear. Leave empty to place at Origin.",
               "maxItems": 1,
               "items": { "type": "object" },
-              "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+              "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
             "axis_name": {
               "type": "string",
@@ -209,7 +209,7 @@
               "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the pinion. Leave empty to place at Origin.",
               "maxItems": 1,
               "items": { "type": "object" },
-              "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+              "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
             "axis_name": {
               "type": "string",
