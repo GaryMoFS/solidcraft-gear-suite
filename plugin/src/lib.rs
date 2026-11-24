@@ -356,8 +356,37 @@ fn circumcenter_3d(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> Option<([f64; 3], [
     Some((v_add(a, offset), v_norm(n)?))
 }
 
+fn resolve_axis_by_name(name: &str) -> Result<PlacementFrame, PluginError> {
+    let trimmed = name.trim();
+    match trimmed {
+        "X" | "x" => return Ok(PlacementFrame::from_axis([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])),
+        "Y" | "y" => return Ok(PlacementFrame::from_axis([0.0, 0.0, 0.0], [0.0, 1.0, 0.0])),
+        "Z" | "z" => return Ok(PlacementFrame::from_axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])),
+        _ => {}
+    }
+    let res = run_cmd(
+        "inspect.measure",
+        json!({ "items": [{ "type": "axis", "name": trimmed }] }),
+    )?;
+    let item = res
+        .get("items")
+        .and_then(Value::as_array)
+        .and_then(|a| a.first())
+        .ok_or_else(|| invalid("axis_name", format!("axis `{trimmed}` not found")))?;
+    let origin = item
+        .get("origin")
+        .and_then(parse_vec3)
+        .ok_or_else(|| invalid("axis_name", format!("axis `{trimmed}` missing origin")))?;
+    let dir = item
+        .get("direction")
+        .and_then(parse_vec3)
+        .ok_or_else(|| invalid("axis_name", format!("axis `{trimmed}` missing direction")))?;
+    Ok(PlacementFrame::from_axis(origin, dir))
+}
+
 fn resolve_placement(
     picks: &[Value],
+    axis_name: &str,
     base_plane: &str,
     flip: bool,
     axial_offset: f64,
@@ -367,6 +396,16 @@ fn resolve_placement(
     if let Some(pick) = picks.first() {
         let ptype = pick.get("type").and_then(Value::as_str).unwrap_or("");
         match ptype {
+            "axis" => {
+                if let Some(name) = pick.get("name").and_then(Value::as_str) {
+                    frame = resolve_axis_by_name(name)?;
+                } else if let (Some(o), Some(d)) = (
+                    pick.get("origin").and_then(parse_vec3),
+                    pick.get("direction").and_then(parse_vec3),
+                ) {
+                    frame = PlacementFrame::from_axis(o, d);
+                }
+            }
             "face" => {
                 let body = pick
                     .get("body")
@@ -472,6 +511,8 @@ fn resolve_placement(
                 }
             }
         }
+    } else if !axis_name.trim().is_empty() {
+        frame = resolve_axis_by_name(axis_name)?;
     }
     Ok(frame.apply_adjustments(flip, axial_offset, layout_angle_deg))
 }
@@ -757,6 +798,7 @@ fn build_parametric_gear(
 #[serde(default)]
 struct SpurGearInput {
     placement: Vec<Value>,
+    axis_name: String,
     base_plane: String,
     flip_direction: bool,
     axial_offset: f64,
@@ -775,6 +817,7 @@ impl Default for SpurGearInput {
     fn default() -> Self {
         Self {
             placement: Vec::new(),
+            axis_name: String::new(),
             base_plane: "XY".into(),
             flip_direction: false,
             axial_offset: 0.0,
@@ -802,7 +845,14 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
         return Err(invalid("teeth", "teeth must be between 8 and 80"));
     }
 
-    let frame = resolve_placement(&inp.placement, &inp.base_plane, inp.flip_direction, inp.axial_offset, 0.0)?;
+    let frame = resolve_placement(
+        &inp.placement,
+        &inp.axis_name,
+        &inp.base_plane,
+        inp.flip_direction,
+        inp.axial_offset,
+        0.0,
+    )?;
     let mut existing = list_existing_params()?;
     let mut existing_names = list_existing_doc_names()?;
     let p = choose_unique_prefix(&p, &existing, &existing_names);
@@ -869,6 +919,7 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
 #[serde(default)]
 struct ParallelPairInput {
     placement: Vec<Value>,
+    axis_name: String,
     base_plane: String,
     layout_angle: f64,
     flip_direction: bool,
@@ -889,6 +940,7 @@ impl Default for ParallelPairInput {
     fn default() -> Self {
         Self {
             placement: Vec::new(),
+            axis_name: String::new(),
             base_plane: "XY".into(),
             layout_angle: 0.0,
             flip_direction: false,
@@ -920,6 +972,7 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
 
     let frame = resolve_placement(
         &inp.placement,
+        &inp.axis_name,
         &inp.base_plane,
         inp.flip_direction,
         inp.axial_offset,

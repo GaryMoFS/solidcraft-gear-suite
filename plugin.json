@@ -8,6 +8,7 @@
     "module": "solidcraft-gear-suite.wasm",
     "commands": [
       "document.inspect",
+      "inspect.measure",
       "model.faces",
       "model.edges",
       "sketch.inspect",
@@ -41,6 +42,7 @@
           "required": ["prefix", "module", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement",
+            "axis_name",
             "base_plane",
             "flip_direction",
             "axial_offset",
@@ -62,6 +64,12 @@
               "maxItems": 1,
               "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+            },
+            "axis_name": {
+              "type": "string",
+              "title": "Axis Name (optional)",
+              "description": "Origin axis (X, Y, Z) or Construction Axis name (e.g. Axis1) to mount coaxially on. Used when no Placement Reference is picked.",
+              "default": ""
             },
             "base_plane": {
               "type": "string",
@@ -177,6 +185,7 @@
           "required": ["prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement",
+            "axis_name",
             "base_plane",
             "layout_angle",
             "flip_direction",
@@ -200,6 +209,12 @@
               "maxItems": 1,
               "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["face", "edge", "sketch_point", "sketch_curve"] }
+            },
+            "axis_name": {
+              "type": "string",
+              "title": "Axis Name (optional)",
+              "description": "Origin axis (X, Y, Z) or Construction Axis name (e.g. Axis1) to mount coaxially on. Used when no Placement Reference is picked.",
+              "default": ""
             },
             "base_plane": {
               "type": "string",
