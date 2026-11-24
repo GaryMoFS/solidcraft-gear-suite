@@ -90,6 +90,71 @@ fn list_existing_params() -> Result<BTreeSet<String>, PluginError> {
     Ok(set)
 }
 
+fn list_existing_doc_names() -> Result<BTreeSet<String>, PluginError> {
+    let res = run_cmd("document.inspect", json!({}))?;
+    let mut set = BTreeSet::new();
+    for key in ["sketches", "features", "bodies"] {
+        if let Some(arr) = res.get(key).and_then(Value::as_array) {
+            for item in arr {
+                if let Some(name) = item.get("name").and_then(Value::as_str) {
+                    set.insert(name.to_string());
+                }
+            }
+        }
+    }
+    Ok(set)
+}
+
+fn choose_unique_prefix(
+    requested: &str,
+    existing_params: &BTreeSet<String>,
+    existing_names: &BTreeSet<String>,
+) -> String {
+    let is_taken = |cand: &str| {
+        existing_params.contains(&format!("{cand}_m"))
+            || existing_names.contains(&format!("{cand}_ToothSketch"))
+            || existing_names.contains(&format!("{cand}_PinionTooth"))
+            || existing_names.contains(&format!("{cand}_Tooth"))
+    };
+    if !is_taken(requested) {
+        return requested.to_string();
+    }
+    // If requested ends with digits (e.g. "g1" or "p1"), increment the number ("g2", "g3", ...).
+    let base = requested.trim_end_matches(|c: char| c.is_ascii_digit());
+    let num_part = &requested[base.len()..];
+    if !base.is_empty() && !num_part.is_empty() {
+        let start = num_part.parse::<u32>().unwrap_or(1) + 1;
+        for n in start..1000 {
+            let cand = format!("{base}{n}");
+            if !is_taken(&cand) {
+                return cand;
+            }
+        }
+    }
+    for n in 2..1000 {
+        let cand = format!("{requested}_{n}");
+        if !is_taken(&cand) {
+            return cand;
+        }
+    }
+    requested.to_string()
+}
+
+fn unique_name(desired: &str, existing_names: &mut BTreeSet<String>) -> String {
+    if !existing_names.contains(desired) {
+        existing_names.insert(desired.to_string());
+        return desired.to_string();
+    }
+    for n in 2..1000 {
+        let cand = format!("{desired}{n}");
+        if !existing_names.contains(&cand) {
+            existing_names.insert(cand.clone());
+            return cand;
+        }
+    }
+    desired.to_string()
+}
+
 fn upsert_param(
     existing: &mut BTreeSet<String>,
     name: &str,
@@ -450,6 +515,8 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
     }
 
     let mut existing = list_existing_params()?;
+    let mut existing_names = list_existing_doc_names()?;
+    let p = choose_unique_prefix(&p, &existing, &existing_names);
 
     let m_p = format!("{p}_m");
     let z_p = format!("{p}_z");
@@ -469,12 +536,13 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
         upsert_param(&mut existing, &bore_p, &fmt_num(inp.bore_diameter), "mm", "Bore diameter", true)?;
     }
 
-    let sketch_name = format!("{p}_ToothSketch");
-    let body_name = if inp.body_name.trim().is_empty() {
+    let sketch_name = unique_name(&format!("{p}_ToothSketch"), &mut existing_names);
+    let desired_body = if inp.body_name.trim().is_empty() {
         format!("{p}_Gear")
     } else {
         inp.body_name.trim().to_string()
     };
+    let body_name = unique_name(&desired_body, &mut existing_names);
 
     let info = build_parametric_gear(
         &mut existing,
@@ -549,8 +617,8 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     }
 
     let mut existing = list_existing_params()?;
-
-    // Shared pair parameters
+    let mut existing_names = list_existing_doc_names()?;
+    let p = choose_unique_prefix(&p, &existing, &existing_names);
     let m_p = format!("{p}_m");
     let z1_p = format!("{p}_z1");
     let z2_p = format!("{p}_z2");
@@ -605,8 +673,8 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     )?;
 
     let g1_prefix = format!("{p}_g1");
-    let g1_sketch = format!("{p}_PinionTooth");
-    let g1_body = format!("{p}_Pinion");
+    let g1_sketch = unique_name(&format!("{p}_PinionTooth"), &mut existing_names);
+    let g1_body = unique_name(&format!("{p}_Pinion"), &mut existing_names);
     let g1 = build_parametric_gear(
         &mut existing,
         &GearSpec {
@@ -630,8 +698,8 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     )?;
 
     let g2_prefix = format!("{p}_g2");
-    let g2_sketch = format!("{p}_GearTooth");
-    let g2_body = format!("{p}_Gear");
+    let g2_sketch = unique_name(&format!("{p}_GearTooth"), &mut existing_names);
+    let g2_body = unique_name(&format!("{p}_Gear"), &mut existing_names);
     let g2 = build_parametric_gear(
         &mut existing,
         &GearSpec {
