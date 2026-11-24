@@ -1,8 +1,8 @@
 {
   "id": "solidcraft-gear-suite",
-  "name": "Gear Suite",
-  "version": "0.1.0",
-  "description": "Parametric equation-driven gear suite: involute spur gears and meshing parallel gear pairs that auto-rebuild from SolidCraft Design Parameters.",
+  "name": "GM Gear Suite",
+  "version": "0.2.0",
+  "description": "Parametric equation-driven gear suite: straight, helical, and herringbone cylindrical gears and meshing parallel gear pairs that auto-rebuild from SolidCraft Design Parameters.",
   "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "solidcraft-gear-suite.wasm",
@@ -23,30 +23,36 @@
       "sketch.finish",
       "solid.cylinder",
       "solid.extrude",
+      "solid.sweep",
+      "solid.mirror",
       "solid.pattern.circular"
     ],
     "limits": {
-      "fuel": 100000000,
+      "fuel": 150000000,
       "memory_mib": 64,
       "deadline_ms": 30000
     },
     "entries": [
       {
-        "name": "parametric-spur-gear",
+        "name": "gm-cylindrical-gear",
         "effect": "edit",
         "slots": [
-          { "kind": "menu", "name": "Parametric Spur Gear..." },
-          { "kind": "ribbon", "name": "Spur Gear" }
+          { "kind": "menu", "name": "GM Cylindrical Gear..." },
+          { "kind": "ribbon", "name": "GM Gear" }
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "teeth", "face_width", "pressure_angle"],
+          "required": ["tooth_type", "prefix", "module", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement",
             "axis_name",
             "base_plane",
             "flip_direction",
             "axial_offset",
+            "tooth_type",
+            "helix_angle",
+            "hand",
+            "module_system",
             "prefix",
             "module",
             "teeth",
@@ -61,7 +67,7 @@
             "placement": {
               "type": "array",
               "title": "Placement Reference (optional)",
-              "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the gear. Leave empty to place at Origin.",
+              "description": "Pick an axis, plane, planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the gear. Leave empty to place at Origin.",
               "maxItems": 1,
               "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -98,6 +104,49 @@
               "maximum": 1000.0,
               "default": 0.0
             },
+            "tooth_type": {
+              "type": "string",
+              "title": "Tooth Type",
+              "description": "Straight (spur), single Helical, or Herringbone (double helical).",
+              "oneOf": [
+                { "const": "straight", "title": "Straight" },
+                { "const": "helical", "title": "Helical" },
+                { "const": "herringbone", "title": "Herringbone (Double Helical)" }
+              ],
+              "default": "straight"
+            },
+            "helix_angle": {
+              "type": "number",
+              "title": "Helix Angle",
+              "description": "Helix angle beta on the pitch cylinder.",
+              "unit": "deg",
+              "minimum": 1.0,
+              "maximum": 45.0,
+              "default": 15.0,
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
+            "hand": {
+              "type": "string",
+              "title": "Helix Hand",
+              "description": "Helix twist direction (for herringbone, applies to the lower half).",
+              "oneOf": [
+                { "const": "right", "title": "Right-Hand (RH)" },
+                { "const": "left", "title": "Left-Hand (LH)" }
+              ],
+              "default": "right",
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
+            "module_system": {
+              "type": "string",
+              "title": "Module System",
+              "description": "Normal (ISO 21771 standard: mt = mn / cos(beta)) or Transverse (mt = m).",
+              "oneOf": [
+                { "const": "normal", "title": "Normal (ISO Standard)" },
+                { "const": "transverse", "title": "Transverse (Axial)" }
+              ],
+              "default": "normal",
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
             "prefix": {
               "type": "string",
               "title": "Parameter Prefix",
@@ -107,7 +156,7 @@
             "module": {
               "type": "number",
               "title": "Module",
-              "description": "Gear module m (pitch diameter = m * z).",
+              "description": "Gear module m (normal mn for helical ISO standard, transverse mt otherwise).",
               "unit": "mm",
               "minimum": 0.25,
               "maximum": 50.0,
@@ -124,7 +173,7 @@
             "pressure_angle": {
               "type": "number",
               "title": "Pressure Angle",
-              "description": "Tooth flank pressure angle.",
+              "description": "Tooth flank pressure angle (normal alpha_n for ISO helical).",
               "unit": "deg",
               "minimum": 14.5,
               "maximum": 25.0,
@@ -133,7 +182,7 @@
             "face_width": {
               "type": "number",
               "title": "Face Width",
-              "description": "Gear thickness along Z.",
+              "description": "Total gear thickness along shaft axis.",
               "unit": "mm",
               "minimum": 0.5,
               "maximum": 500.0,
@@ -169,21 +218,21 @@
               "type": "string",
               "title": "Body Name",
               "description": "Optional name for the generated gear body.",
-              "default": "SpurGear"
+              "default": "GM_Gear"
             }
           }
         }
       },
       {
-        "name": "parametric-parallel-pair",
+        "name": "gm-parallel-pair",
         "effect": "edit",
         "slots": [
-          { "kind": "menu", "name": "Parametric Parallel Gear Pair..." },
-          { "kind": "ribbon", "name": "Parallel Pair" }
+          { "kind": "menu", "name": "GM Parallel Gear Pair..." },
+          { "kind": "ribbon", "name": "GM Parallel Pair" }
         ],
         "input_schema": {
           "type": "object",
-          "required": ["prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
+          "required": ["tooth_type", "prefix", "module", "teeth_1", "teeth_2", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement",
             "axis_name",
@@ -191,6 +240,10 @@
             "layout_angle",
             "flip_direction",
             "axial_offset",
+            "tooth_type",
+            "helix_angle",
+            "hand",
+            "module_system",
             "prefix",
             "module",
             "teeth_1",
@@ -206,7 +259,7 @@
             "placement": {
               "type": "array",
               "title": "Pinion Placement Reference (optional)",
-              "description": "Pick a planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the pinion. Leave empty to place at Origin.",
+              "description": "Pick an axis, plane, planar face, cylindrical face (shaft/bore), circular edge, or sketch point to place the pinion. Leave empty to place at Origin.",
               "maxItems": 1,
               "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -252,6 +305,49 @@
               "maximum": 1000.0,
               "default": 0.0
             },
+            "tooth_type": {
+              "type": "string",
+              "title": "Tooth Type",
+              "description": "Straight, single Helical (opposite hands on Gear 1 & 2), or Herringbone (double helical).",
+              "oneOf": [
+                { "const": "straight", "title": "Straight" },
+                { "const": "helical", "title": "Helical" },
+                { "const": "herringbone", "title": "Herringbone (Double Helical)" }
+              ],
+              "default": "straight"
+            },
+            "helix_angle": {
+              "type": "number",
+              "title": "Helix Angle",
+              "description": "Shared helix angle beta on the pitch cylinders.",
+              "unit": "deg",
+              "minimum": 1.0,
+              "maximum": 45.0,
+              "default": 15.0,
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
+            "hand": {
+              "type": "string",
+              "title": "Pinion Helix Hand",
+              "description": "Helix hand for Pinion (Gear 1); Gear 2 automatically uses the opposite hand to mesh.",
+              "oneOf": [
+                { "const": "right", "title": "Right-Hand (Pinion RH / Gear LH)" },
+                { "const": "left", "title": "Left-Hand (Pinion LH / Gear RH)" }
+              ],
+              "default": "right",
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
+            "module_system": {
+              "type": "string",
+              "title": "Module System",
+              "description": "Normal (ISO 21771 standard: mt = mn / cos(beta)) or Transverse (mt = m).",
+              "oneOf": [
+                { "const": "normal", "title": "Normal (ISO Standard)" },
+                { "const": "transverse", "title": "Transverse (Axial)" }
+              ],
+              "default": "normal",
+              "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
+            },
             "prefix": {
               "type": "string",
               "title": "Parameter Prefix",
@@ -270,7 +366,7 @@
             "teeth_1": {
               "type": "integer",
               "title": "Pinion Teeth (Z1)",
-              "description": "Number of teeth on Gear 1 (at origin).",
+              "description": "Number of teeth on Gear 1 (at placement reference).",
               "minimum": 8,
               "maximum": 80,
               "default": 16
@@ -278,7 +374,7 @@
             "teeth_2": {
               "type": "integer",
               "title": "Gear Teeth (Z2)",
-              "description": "Number of teeth on Gear 2 (at center distance along +X).",
+              "description": "Number of teeth on Gear 2 (at center distance).",
               "minimum": 8,
               "maximum": 80,
               "default": 32
@@ -295,7 +391,7 @@
             "face_width": {
               "type": "number",
               "title": "Face Width",
-              "description": "Shared gear thickness along Z.",
+              "description": "Shared total gear thickness along shaft axis.",
               "unit": "mm",
               "minimum": 0.5,
               "maximum": 500.0,
@@ -331,7 +427,7 @@
             "backlash_mode": {
               "type": "string",
               "title": "Backlash Method",
-              "description": "Tooth Thinning keeps nominal center distance a = m*(Z1+Z2)/2 and thins each gear by jt/2. Center Distance Increase keeps nominal teeth and adds jt/(2*tan(alpha)) to center distance.",
+              "description": "Tooth Thinning keeps nominal center distance and thins each gear by jt/2. Center Distance Increase keeps nominal teeth and adds jt/(2*tan(alpha_t)) to center distance.",
               "oneOf": [
                 { "const": "tooth_thinning", "title": "Tooth Thinning (Fixed Center Distance)" },
                 { "const": "center_distance", "title": "Center Distance Increase (Nominal Teeth)" }

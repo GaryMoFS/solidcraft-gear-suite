@@ -37,8 +37,8 @@ impl Guest for GearSuitePlugin {
         let value: Value =
             serde_json::from_str(&params).map_err(|e| invalid("params", format!("invalid JSON: {e}")))?;
         match entry.as_str() {
-            "parametric-spur-gear" => run_spur_gear(&value),
-            "parametric-parallel-pair" => run_parallel_pair(&value),
+            "gm-cylindrical-gear" | "parametric-spur-gear" => run_cylindrical_gear(&value),
+            "gm-parallel-pair" | "parametric-parallel-pair" => run_parallel_pair(&value),
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
     }
@@ -312,31 +312,51 @@ impl PlacementFrame {
     }
 
     fn origin_json(&self, offset_param: Option<&str>) -> Value {
-        match offset_param {
-            None => json!([self.origin[0], self.origin[1], self.origin[2]]),
-            Some(dist_p) => {
-                let comp = |o: f64, d: f64| -> Value {
-                    if libm::fabs(d) < 1e-9 {
-                        json!(o)
-                    } else if libm::fabs(o) < 1e-9 {
-                        if libm::fabs(d - 1.0) < 1e-9 {
-                            json!(dist_p)
-                        } else if libm::fabs(d + 1.0) < 1e-9 {
-                            json!(format!("-{dist_p}"))
-                        } else {
-                            json!(format!("{dist_p} * {}", fmt_num(d)))
-                        }
-                    } else {
-                        json!(format!("{} mm + {dist_p} * {}", fmt_num(o), fmt_num(d)))
-                    }
-                };
-                json!([
-                    comp(self.origin[0], self.x_dir[0]),
-                    comp(self.origin[1], self.x_dir[1]),
-                    comp(self.origin[2], self.x_dir[2]),
-                ])
-            }
+        self.origin_offset_json(offset_param, None)
+    }
+
+    fn origin_offset_json(&self, x_param: Option<&str>, z_param: Option<&str>) -> Value {
+        if x_param.is_none() && z_param.is_none() {
+            return json!([self.origin[0], self.origin[1], self.origin[2]]);
         }
+        let comp = |o: f64, dx: f64, dz: f64| -> Value {
+            let mut terms: Vec<String> = Vec::new();
+            if libm::fabs(o) >= 1e-9 {
+                terms.push(format!("{} mm", fmt_num(o)));
+            }
+            if let Some(xp) = x_param {
+                if libm::fabs(dx) >= 1e-9 {
+                    if libm::fabs(dx - 1.0) < 1e-9 {
+                        terms.push(xp.to_string());
+                    } else if libm::fabs(dx + 1.0) < 1e-9 {
+                        terms.push(format!("-{xp}"));
+                    } else {
+                        terms.push(format!("{xp} * {}", fmt_num(dx)));
+                    }
+                }
+            }
+            if let Some(zp) = z_param {
+                if libm::fabs(dz) >= 1e-9 {
+                    if libm::fabs(dz - 1.0) < 1e-9 {
+                        terms.push(zp.to_string());
+                    } else if libm::fabs(dz + 1.0) < 1e-9 {
+                        terms.push(format!("-{zp}"));
+                    } else {
+                        terms.push(format!("{zp} * {}", fmt_num(dz)));
+                    }
+                }
+            }
+            if terms.is_empty() {
+                json!(0.0)
+            } else {
+                json!(terms.join(" + "))
+            }
+        };
+        json!([
+            comp(self.origin[0], self.x_dir[0], self.z_dir[0]),
+            comp(self.origin[1], self.x_dir[1], self.z_dir[1]),
+            comp(self.origin[2], self.x_dir[2], self.z_dir[2]),
+        ])
     }
 }
 
@@ -546,21 +566,44 @@ fn resolve_placement(
     Ok(frame.apply_adjustments(flip, axial_offset, layout_angle_deg))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ToothKind {
+    Straight,
+    Helical,
+    Herringbone,
+}
+
+impl ToothKind {
+    fn parse(s: &str) -> Self {
+        match s {
+            "helical" => Self::Helical,
+            "herringbone" => Self::Herringbone,
+            _ => Self::Straight,
+        }
+    }
+}
+
 struct GearSpec<'a> {
     derived_prefix: &'a str,
     m_param: &'a str,
+    mt_param: &'a str,
+    at_param: &'a str,
     z_param: &'a str,
-    alpha_param: &'a str,
     fw_param: &'a str,
     x_param: &'a str,
     bl_param: &'a str,
     bore_param: Option<&'a str>,
     phi_param: Option<&'a str>,
+    tooth_kind: ToothKind,
+    beta_param: Option<&'a str>,
+    hand_sign: f64,
     frame: PlacementFrame,
     offset_x_param: Option<&'a str>,
     sketch_name: &'a str,
+    path_sketch_name: &'a str,
     body_name: &'a str,
-    module_val: f64,
+    m_val: f64,
+    mt_val: f64,
     teeth_val: u32,
     shift_val: f64,
     bore_val: f64,
@@ -589,8 +632,9 @@ fn build_parametric_gear(
 ) -> Result<Value, PluginError> {
     let gp = spec.derived_prefix;
     let m = spec.m_param;
+    let mt = spec.mt_param;
+    let at = spec.at_param;
     let z = spec.z_param;
-    let alpha = spec.alpha_param;
     let fw = spec.fw_param;
     let x = spec.x_param;
     let bl = spec.bl_param;
@@ -606,7 +650,9 @@ fn build_parametric_gear(
     let psi = format!("{gp}_psi");
 
     // Validate basic geometry against numeric values before issuing CAD commands.
-    let root_dia = spec.module_val * (spec.teeth_val as f64 - 2.5 + 2.0 * spec.shift_val);
+    let pitch_dia = spec.mt_val * spec.teeth_val as f64;
+    let outer_dia = pitch_dia + 2.0 * spec.m_val * (1.0 + spec.shift_val);
+    let root_dia = pitch_dia - 2.0 * spec.m_val * (1.25 - spec.shift_val);
     if root_dia <= 0.5 {
         return Err(invalid("teeth", "root diameter is too small for this module/shift"));
     }
@@ -618,10 +664,10 @@ fn build_parametric_gear(
     }
 
     // Derived involute geometry parameters (auto-rebuilt by SolidCraft kernel).
-    upsert_param(existing, &rp, &format!("{m} * {z} / 2"), "mm", "Pitch radius", false)?;
-    upsert_param(existing, &rb, &format!("{rp} * cos({alpha})"), "mm", "Base radius", false)?;
-    upsert_param(existing, &ra, &format!("{m} * ({z} / 2 + 1 + {x})"), "mm", "Tip (addendum) radius", false)?;
-    upsert_param(existing, &rf, &format!("{m} * ({z} / 2 - 1.25 + {x})"), "mm", "Root (dedendum) radius", false)?;
+    upsert_param(existing, &rp, &format!("{mt} * {z} / 2"), "mm", "Pitch radius", false)?;
+    upsert_param(existing, &rb, &format!("{rp} * cos({at})"), "mm", "Base radius", false)?;
+    upsert_param(existing, &ra, &format!("{rp} + {m} * (1 + {x})"), "mm", "Tip (addendum) radius", false)?;
+    upsert_param(existing, &rf, &format!("{rp} - {m} * (1.25 - {x})"), "mm", "Root (dedendum) radius", false)?;
     upsert_param(existing, &r_start, &format!("max({rb}, {rf})"), "mm", "Involute start radius", false)?;
     upsert_param(
         existing,
@@ -642,19 +688,28 @@ fn build_parametric_gear(
     upsert_param(
         existing,
         &inv_a,
-        &format!("tan({alpha}) - {alpha} / 1 rad"),
+        &format!("tan({at}) - {at} / 1 rad"),
         "",
-        "Involute function at pressure angle",
+        "Involute function at transverse pressure angle",
         false,
     )?;
     upsert_param(
         existing,
         &psi,
-        &format!("(pi / 2 + 2 * {x} * tan({alpha}) - {bl} / {m}) / {z} + {inv_a}"),
+        &format!("(pi / 2 + 2 * {x} * tan({at}) - {bl} / {mt}) / {z} + {inv_a}"),
         "",
         "Half tooth angular width on base circle (rad)",
         false,
     )?;
+
+    let is_herringbone = spec.tooth_kind == ToothKind::Herringbone;
+    let build_h = if is_herringbone {
+        let fh = format!("{gp}_fw_half");
+        upsert_param(existing, &fh, &format!("{fw} / 2"), "mm", "Half face width (herringbone)", false)?;
+        fh
+    } else {
+        fw.to_string()
+    };
 
     let base_origin = spec.frame.origin_json(spec.offset_x_param);
     let axis_vec = json!([spec.frame.z_dir[0], spec.frame.z_dir[1], spec.frame.z_dir[2]]);
@@ -664,7 +719,7 @@ fn build_parametric_gear(
         "solid.cylinder",
         json!({
             "radius": rf,
-            "height": fw,
+            "height": &build_h,
             "base": base_origin,
             "axis": axis_vec,
             "operation": "new_body",
@@ -763,23 +818,83 @@ fn build_parametric_gear(
     )?;
     run_cmd("sketch.finish", json!({}))?;
 
-    // 3. Extrude single tooth wedge and join onto root hub.
+    // 3. Build single tooth (extrude for straight, twisted sweep for helical/herringbone).
     let tooth_name = format!("{gp}_Tooth");
-    let ext_res = run_cmd(
-        "solid.extrude",
-        json!({
-            "sketch": spec.sketch_name,
-            "distance": fw,
-            "operation": "join",
-            "targets": [&actual_body],
-            "name": tooth_name,
-        }),
-    )?;
-    let tooth_feature = ext_res
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or(&tooth_name)
-        .to_string();
+    let tooth_feature = if spec.tooth_kind == ToothKind::Straight {
+        let ext_res = run_cmd(
+            "solid.extrude",
+            json!({
+                "sketch": spec.sketch_name,
+                "distance": &build_h,
+                "operation": "join",
+                "targets": [&actual_body],
+                "name": tooth_name,
+            }),
+        )?;
+        ext_res
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&tooth_name)
+            .to_string()
+    } else {
+        let beta = spec.beta_param.unwrap_or("15 deg");
+        let twist_p = format!("{gp}_twist");
+        let sign = if spec.hand_sign < 0.0 { "-" } else { "" };
+        upsert_param(
+            existing,
+            &twist_p,
+            &format!("{sign}({build_h} * tan({beta}) / {rp}) * (180 / pi)"),
+            "deg",
+            "Helical sweep twist angle",
+            false,
+        )?;
+
+        // Axis path sketch on local XZ plane (x_dir = frame.x_dir, y_dir = frame.z_dir).
+        run_cmd(
+            "sketch.create",
+            json!({
+                "plane": {
+                    "origin": base_origin,
+                    "x_dir": [spec.frame.x_dir[0], spec.frame.x_dir[1], spec.frame.x_dir[2]],
+                    "y_dir": [spec.frame.z_dir[0], spec.frame.z_dir[1], spec.frame.z_dir[2]],
+                },
+                "name": spec.path_sketch_name,
+            }),
+        )?;
+        let line_res = run_cmd(
+            "sketch.line",
+            json!({
+                "points": [[0.0, 0.0], [0.0, &build_h]],
+            }),
+        )?;
+        let path_curve = line_res
+            .get("created")
+            .and_then(|c| c.get("curves"))
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .ok_or_else(|| PluginError::Trap("helical axis path sketch.line missing curve id".into()))?
+            .to_string();
+        run_cmd("sketch.finish", json!({}))?;
+
+        let sweep_res = run_cmd(
+            "solid.sweep",
+            json!({
+                "sketch": spec.sketch_name,
+                "path_sketch": spec.path_sketch_name,
+                "path": [path_curve],
+                "twist": twist_p,
+                "operation": "join",
+                "targets": [&actual_body],
+                "name": tooth_name,
+            }),
+        )?;
+        sweep_res
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&tooth_name)
+            .to_string()
+    };
 
     // 4. Parametric circular pattern of the tooth around gear axis.
     run_cmd(
@@ -802,7 +917,7 @@ fn build_parametric_gear(
                 "solid.cylinder",
                 json!({
                     "diameter": bore_p,
-                    "height": fw,
+                    "height": &build_h,
                     "base": base_origin,
                     "axis": axis_vec,
                     "operation": "cut",
@@ -812,8 +927,22 @@ fn build_parametric_gear(
         }
     }
 
-    let pitch_dia = spec.module_val * spec.teeth_val as f64;
-    let outer_dia = spec.module_val * (spec.teeth_val as f64 + 2.0 + 2.0 * spec.shift_val);
+    // 6. For herringbone, mirror bottom half across live midplane (z = fw / 2) and combine!
+    if is_herringbone {
+        let mid_origin = spec.frame.origin_offset_json(spec.offset_x_param, Some(&build_h));
+        run_cmd(
+            "solid.mirror",
+            json!({
+                "bodies": [&actual_body],
+                "combine": true,
+                "plane": {
+                    "origin": mid_origin,
+                    "normal": axis_vec,
+                },
+            }),
+        )?;
+    }
+
     Ok(json!({
         "body": actual_body,
         "sketch": spec.sketch_name,
@@ -825,12 +954,16 @@ fn build_parametric_gear(
 
 #[derive(Deserialize)]
 #[serde(default)]
-struct SpurGearInput {
+struct CylindricalGearInput {
     placement: Vec<Value>,
     axis_name: String,
     base_plane: String,
     flip_direction: bool,
     axial_offset: f64,
+    tooth_type: String,
+    helix_angle: f64,
+    hand: String,
+    module_system: String,
     prefix: String,
     module: f64,
     teeth: u32,
@@ -842,7 +975,7 @@ struct SpurGearInput {
     body_name: String,
 }
 
-impl Default for SpurGearInput {
+impl Default for CylindricalGearInput {
     fn default() -> Self {
         Self {
             placement: Vec::new(),
@@ -850,6 +983,10 @@ impl Default for SpurGearInput {
             base_plane: "XY".into(),
             flip_direction: false,
             axial_offset: 0.0,
+            tooth_type: "straight".into(),
+            helix_angle: 15.0,
+            hand: "right".into(),
+            module_system: "normal".into(),
             prefix: "g1".into(),
             module: 2.0,
             teeth: 20,
@@ -858,13 +995,56 @@ impl Default for SpurGearInput {
             bore_diameter: 8.0,
             profile_shift: 0.0,
             backlash: 0.05,
-            body_name: "SpurGear".into(),
+            body_name: "GM_Gear".into(),
         }
     }
 }
 
-fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
-    let inp: SpurGearInput =
+fn setup_transverse_params(
+    existing: &mut BTreeSet<String>,
+    p: &str,
+    m_p: &str,
+    a_p: &str,
+    tooth_kind: ToothKind,
+    helix_angle: f64,
+    module_system: &str,
+    m_val: f64,
+    alpha_deg: f64,
+) -> Result<(String, String, Option<String>, f64, f64), PluginError> {
+    if tooth_kind == ToothKind::Straight {
+        return Ok((m_p.to_string(), a_p.to_string(), None, m_val, alpha_deg));
+    }
+    if !(1.0..=45.0).contains(&helix_angle) {
+        return Err(invalid("helix_angle", "helix_angle must be between 1 and 45 deg"));
+    }
+    let beta_p = format!("{p}_beta");
+    upsert_param(existing, &beta_p, &fmt_num(helix_angle), "deg", "Helix angle", true)?;
+    let beta_rad = helix_angle * core::f64::consts::PI / 180.0;
+    let cos_b = libm::cos(beta_rad);
+
+    if module_system == "transverse" {
+        Ok((m_p.to_string(), a_p.to_string(), Some(beta_p), m_val, alpha_deg))
+    } else {
+        let mt_p = format!("{p}_mt");
+        let at_p = format!("{p}_at");
+        upsert_param(existing, &mt_p, &format!("{m_p} / cos({beta_p})"), "mm", "Transverse module", false)?;
+        upsert_param(
+            existing,
+            &at_p,
+            &format!("atan(tan({a_p}) / cos({beta_p}))"),
+            "deg",
+            "Transverse pressure angle",
+            false,
+        )?;
+        let mt_val = m_val / cos_b;
+        let alpha_rad = alpha_deg * core::f64::consts::PI / 180.0;
+        let at_deg = libm::atan(libm::tan(alpha_rad) / cos_b) * 180.0 / core::f64::consts::PI;
+        Ok((mt_p, at_p, Some(beta_p), mt_val, at_deg))
+    }
+}
+
+fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
+    let inp: CylindricalGearInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
     if inp.module <= 0.0 || inp.face_width <= 0.0 {
@@ -873,6 +1053,8 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
     if inp.teeth < 8 || inp.teeth > 80 {
         return Err(invalid("teeth", "teeth must be between 8 and 80"));
     }
+    let tooth_kind = ToothKind::parse(&inp.tooth_type);
+    let hand_sign = if inp.hand == "left" { -1.0 } else { 1.0 };
 
     let frame = resolve_placement(
         &inp.placement,
@@ -904,7 +1086,20 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
         upsert_param(&mut existing, &bore_p, &fmt_num(inp.bore_diameter), "mm", "Bore diameter", true)?;
     }
 
+    let (mt_p, at_p, beta_p, mt_val, _at_deg) = setup_transverse_params(
+        &mut existing,
+        &p,
+        &m_p,
+        &a_p,
+        tooth_kind,
+        inp.helix_angle,
+        &inp.module_system,
+        inp.module,
+        inp.pressure_angle,
+    )?;
+
     let sketch_name = unique_name(&format!("{p}_ToothSketch"), &mut existing_names);
+    let path_sketch_name = unique_name(&format!("{p}_AxisPath"), &mut existing_names);
     let desired_body = if inp.body_name.trim().is_empty() {
         format!("{p}_Gear")
     } else {
@@ -917,18 +1112,24 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
         &GearSpec {
             derived_prefix: &p,
             m_param: &m_p,
+            mt_param: &mt_p,
+            at_param: &at_p,
             z_param: &z_p,
-            alpha_param: &a_p,
             fw_param: &fw_p,
             x_param: &x_p,
             bl_param: &bl_p,
             bore_param: if inp.bore_diameter > 0.0 { Some(&bore_p) } else { None },
             phi_param: None,
+            tooth_kind,
+            beta_param: beta_p.as_deref(),
+            hand_sign,
             frame,
             offset_x_param: None,
             sketch_name: &sketch_name,
+            path_sketch_name: &path_sketch_name,
             body_name: &body_name,
-            module_val: inp.module,
+            m_val: inp.module,
+            mt_val,
             teeth_val: inp.teeth,
             shift_val: inp.profile_shift,
             bore_val: inp.bore_diameter,
@@ -936,7 +1137,8 @@ fn run_spur_gear(raw: &Value) -> Result<String, PluginError> {
     )?;
 
     let out = json!({
-        "mode": "parametric-spur-gear",
+        "mode": "gm-cylindrical-gear",
+        "tooth_type": inp.tooth_type,
         "prefix": p,
         "gear": info,
         "editable_parameters": [m_p, z_p, a_p, fw_p, x_p, bl_p],
@@ -953,6 +1155,10 @@ struct ParallelPairInput {
     layout_angle: f64,
     flip_direction: bool,
     axial_offset: f64,
+    tooth_type: String,
+    helix_angle: f64,
+    hand: String,
+    module_system: String,
     prefix: String,
     module: f64,
     teeth_1: u32,
@@ -974,6 +1180,10 @@ impl Default for ParallelPairInput {
             layout_angle: 0.0,
             flip_direction: false,
             axial_offset: 0.0,
+            tooth_type: "straight".into(),
+            helix_angle: 15.0,
+            hand: "right".into(),
+            module_system: "normal".into(),
             prefix: "p1".into(),
             module: 2.0,
             teeth_1: 16,
@@ -998,6 +1208,9 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     if inp.teeth_1 < 8 || inp.teeth_1 > 80 || inp.teeth_2 < 8 || inp.teeth_2 > 80 {
         return Err(invalid("teeth_1", "tooth counts must be between 8 and 80"));
     }
+    let tooth_kind = ToothKind::parse(&inp.tooth_type);
+    let hand_sign_1 = if inp.hand == "left" { -1.0 } else { 1.0 };
+    let hand_sign_2 = -hand_sign_1;
 
     let frame = resolve_placement(
         &inp.placement,
@@ -1045,11 +1258,23 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         upsert_param(&mut existing, &b2_p, &fmt_num(inp.bore_2), "mm", "Gear bore diameter", true)?;
     }
 
+    let (mt_p, at_p, beta_p, mt_val, at_deg) = setup_transverse_params(
+        &mut existing,
+        &p,
+        &m_p,
+        &a_p,
+        tooth_kind,
+        inp.helix_angle,
+        &inp.module_system,
+        inp.module,
+        inp.pressure_angle,
+    )?;
+
     // ISO 21771 center distance (nominal or backlash-shifted), gear ratio, and Gear 2 meshing phase.
     let cd_expr = if cd_backlash {
-        format!("{m_p} * ({z1_p} + {z2_p}) / 2 + {bl_p} / (2 * tan({a_p}))")
+        format!("{mt_p} * ({z1_p} + {z2_p}) / 2 + {bl_p} / (2 * tan({at_p}))")
     } else {
-        format!("{m_p} * ({z1_p} + {z2_p}) / 2")
+        format!("{mt_p} * ({z1_p} + {z2_p}) / 2")
     };
     upsert_param(
         &mut existing,
@@ -1078,24 +1303,31 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
 
     let g1_prefix = format!("{p}_g1");
     let g1_sketch = unique_name(&format!("{p}_PinionTooth"), &mut existing_names);
+    let g1_path = unique_name(&format!("{p}_PinionAxis"), &mut existing_names);
     let g1_body = unique_name(&format!("{p}_Pinion"), &mut existing_names);
     let g1 = build_parametric_gear(
         &mut existing,
         &GearSpec {
             derived_prefix: &g1_prefix,
             m_param: &m_p,
+            mt_param: &mt_p,
+            at_param: &at_p,
             z_param: &z1_p,
-            alpha_param: &a_p,
             fw_param: &fw_p,
             x_param: &x0_p,
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_1 > 0.0 { Some(&b1_p) } else { None },
             phi_param: None,
+            tooth_kind,
+            beta_param: beta_p.as_deref(),
+            hand_sign: hand_sign_1,
             frame,
             offset_x_param: None,
             sketch_name: &g1_sketch,
+            path_sketch_name: &g1_path,
             body_name: &g1_body,
-            module_val: inp.module,
+            m_val: inp.module,
+            mt_val,
             teeth_val: inp.teeth_1,
             shift_val: 0.0,
             bore_val: inp.bore_1,
@@ -1104,36 +1336,44 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
 
     let g2_prefix = format!("{p}_g2");
     let g2_sketch = unique_name(&format!("{p}_GearTooth"), &mut existing_names);
+    let g2_path = unique_name(&format!("{p}_GearAxis"), &mut existing_names);
     let g2_body = unique_name(&format!("{p}_Gear"), &mut existing_names);
     let g2 = build_parametric_gear(
         &mut existing,
         &GearSpec {
             derived_prefix: &g2_prefix,
             m_param: &m_p,
+            mt_param: &mt_p,
+            at_param: &at_p,
             z_param: &z2_p,
-            alpha_param: &a_p,
             fw_param: &fw_p,
             x_param: &x0_p,
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_2 > 0.0 { Some(&b2_p) } else { None },
             phi_param: Some(&phi2_p),
+            tooth_kind,
+            beta_param: beta_p.as_deref(),
+            hand_sign: hand_sign_2,
             frame,
             offset_x_param: Some(&cd_p),
             sketch_name: &g2_sketch,
+            path_sketch_name: &g2_path,
             body_name: &g2_body,
-            module_val: inp.module,
+            m_val: inp.module,
+            mt_val,
             teeth_val: inp.teeth_2,
             shift_val: 0.0,
             bore_val: inp.bore_2,
         },
     )?;
 
-    let alpha_rad = inp.pressure_angle * core::f64::consts::PI / 180.0;
-    let cd_mm = inp.module * (inp.teeth_1 + inp.teeth_2) as f64 / 2.0
-        + if cd_backlash { inp.backlash / (2.0 * libm::tan(alpha_rad)) } else { 0.0 };
+    let at_rad = at_deg * core::f64::consts::PI / 180.0;
+    let cd_mm = mt_val * (inp.teeth_1 + inp.teeth_2) as f64 / 2.0
+        + if cd_backlash { inp.backlash / (2.0 * libm::tan(at_rad)) } else { 0.0 };
     let ratio = inp.teeth_2 as f64 / inp.teeth_1 as f64;
     let out = json!({
-        "mode": "parametric-parallel-pair",
+        "mode": "gm-parallel-pair",
+        "tooth_type": inp.tooth_type,
         "prefix": p,
         "center_distance_mm": cd_mm,
         "gear_ratio": ratio,
