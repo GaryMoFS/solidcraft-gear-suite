@@ -353,7 +353,10 @@ fn build_parametric_gear(
             format!("{rb} * (sin({phi} - {psi} + t) - t * cos({phi} - {psi} + t))"),
             format!("{rb} * (cos({phi} + {psi} - t) - t * sin({phi} + {psi} - t))"),
             format!("{rb} * (sin({phi} + {psi} - t) + t * cos({phi} + {psi} - t))"),
-            json!([format!("{ra} * cos({phi})"), format!("{ra} * sin({phi})")]),
+            json!([
+                format!("{ra} * cos({phi} * 1 rad)"),
+                format!("{ra} * sin({phi} * 1 rad)")
+            ]),
         ),
         None => (
             format!("{rb} * (cos(t - {psi}) + t * sin(t - {psi}))"),
@@ -587,6 +590,7 @@ struct ParallelPairInput {
     bore_1: f64,
     bore_2: f64,
     backlash: f64,
+    backlash_mode: String,
 }
 
 impl Default for ParallelPairInput {
@@ -601,6 +605,7 @@ impl Default for ParallelPairInput {
             bore_1: 6.0,
             bore_2: 10.0,
             backlash: 0.05,
+            backlash_mode: "tooth_thinning".into(),
         }
     }
 }
@@ -626,11 +631,14 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     let fw_p = format!("{p}_fw");
     let x0_p = format!("{p}_x");
     let bl_p = format!("{p}_bl");
+    let bl_tooth_p = format!("{p}_bl_tooth");
     let b1_p = format!("{p}_bore1");
     let b2_p = format!("{p}_bore2");
     let cd_p = format!("{p}_cd");
     let ratio_p = format!("{p}_ratio");
     let phi2_p = format!("{p}_g2_phi");
+
+    let cd_backlash = inp.backlash_mode == "center_distance";
 
     upsert_param(&mut existing, &m_p, &fmt_num(inp.module), "mm", "Shared module", true)?;
     upsert_param(&mut existing, &z1_p, &format!("{}", inp.teeth_1), "", "Pinion tooth count (Z1)", true)?;
@@ -638,7 +646,12 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &a_p, &fmt_num(inp.pressure_angle), "deg", "Shared pressure angle", true)?;
     upsert_param(&mut existing, &fw_p, &fmt_num(inp.face_width), "mm", "Shared face width", true)?;
     upsert_param(&mut existing, &x0_p, "0", "", "Profile shift coefficient", false)?;
-    upsert_param(&mut existing, &bl_p, &fmt_num(inp.backlash), "mm", "Backlash per gear", false)?;
+    upsert_param(&mut existing, &bl_p, &fmt_num(inp.backlash), "mm", "Total circumferential meshing backlash jt", true)?;
+    if cd_backlash {
+        upsert_param(&mut existing, &bl_tooth_p, "0", "mm", "Per-gear tooth thinning (0 in center-distance mode)", false)?;
+    } else {
+        upsert_param(&mut existing, &bl_tooth_p, &format!("{bl_p} / 2"), "mm", "Per-gear tooth thinning (jt / 2)", false)?;
+    }
     if inp.bore_1 > 0.0 {
         upsert_param(&mut existing, &b1_p, &fmt_num(inp.bore_1), "mm", "Pinion bore diameter", true)?;
     }
@@ -646,13 +659,18 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         upsert_param(&mut existing, &b2_p, &fmt_num(inp.bore_2), "mm", "Gear bore diameter", true)?;
     }
 
-    // Auto-rebuilding center distance, gear ratio, and Gear 2 meshing phase!
+    // ISO 21771 center distance (nominal or backlash-shifted), gear ratio, and Gear 2 meshing phase.
+    let cd_expr = if cd_backlash {
+        format!("{m_p} * ({z1_p} + {z2_p}) / 2 + {bl_p} / (2 * tan({a_p}))")
+    } else {
+        format!("{m_p} * ({z1_p} + {z2_p}) / 2")
+    };
     upsert_param(
         &mut existing,
         &cd_p,
-        &format!("{m_p} * ({z1_p} + {z2_p}) / 2"),
+        &cd_expr,
         "mm",
-        "Shaft center distance (auto-updates with m, Z1, Z2)",
+        "ISO 21771 shaft center distance",
         true,
     )?;
     upsert_param(
@@ -684,7 +702,7 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             alpha_param: &a_p,
             fw_param: &fw_p,
             x_param: &x0_p,
-            bl_param: &bl_p,
+            bl_param: &bl_tooth_p,
             bore_param: if inp.bore_1 > 0.0 { Some(&b1_p) } else { None },
             phi_param: None,
             origin_x_expr: None,
@@ -709,7 +727,7 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             alpha_param: &a_p,
             fw_param: &fw_p,
             x_param: &x0_p,
-            bl_param: &bl_p,
+            bl_param: &bl_tooth_p,
             bore_param: if inp.bore_2 > 0.0 { Some(&b2_p) } else { None },
             phi_param: Some(&phi2_p),
             origin_x_expr: Some(&cd_p),
@@ -722,7 +740,9 @@ fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         },
     )?;
 
-    let cd_mm = inp.module * (inp.teeth_1 + inp.teeth_2) as f64 / 2.0;
+    let alpha_rad = inp.pressure_angle * core::f64::consts::PI / 180.0;
+    let cd_mm = inp.module * (inp.teeth_1 + inp.teeth_2) as f64 / 2.0
+        + if cd_backlash { inp.backlash / (2.0 * libm::tan(alpha_rad)) } else { 0.0 };
     let ratio = inp.teeth_2 as f64 / inp.teeth_1 as f64;
     let out = json!({
         "mode": "parametric-parallel-pair",

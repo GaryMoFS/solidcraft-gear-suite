@@ -143,7 +143,8 @@
             "face_width",
             "bore_1",
             "bore_2",
-            "backlash"
+            "backlash",
+            "backlash_mode"
           ],
           "properties": {
             "prefix": {
@@ -215,12 +216,22 @@
             },
             "backlash": {
               "type": "number",
-              "title": "Backlash",
-              "description": "Circumferential backlash applied per gear.",
+              "title": "Backlash (Total)",
+              "description": "Total circumferential meshing backlash jt on the pitch circle (ISO 21771).",
               "unit": "mm",
               "minimum": 0.0,
               "maximum": 5.0,
               "default": 0.05
+            },
+            "backlash_mode": {
+              "type": "string",
+              "title": "Backlash Method",
+              "description": "Tooth Thinning keeps nominal center distance a = m*(Z1+Z2)/2 and thins each gear by jt/2. Center Distance Increase keeps nominal teeth and adds jt/(2*tan(alpha)) to center distance.",
+              "oneOf": [
+                { "const": "tooth_thinning", "title": "Tooth Thinning (Fixed Center Distance)" },
+                { "const": "center_distance", "title": "Center Distance Increase (Nominal Teeth)" }
+              ],
+              "default": "tooth_thinning"
             }
           }
         }
