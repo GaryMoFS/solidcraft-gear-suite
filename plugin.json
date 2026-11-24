@@ -31,9 +31,9 @@
       "solid.combine"
     ],
     "limits": {
-      "fuel": 250000000,
+      "fuel": 500000000,
       "memory_mib": 64,
-      "deadline_ms": 30000
+      "deadline_ms": 180000
     },
     "entries": [
       {
@@ -45,6 +45,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["gear_side", "tooth_type", "prefix", "module", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
@@ -143,6 +144,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "teeth_1", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
@@ -243,6 +245,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "sun_teeth", "num_planets", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
@@ -327,6 +330,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "pinion_teeth", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
@@ -387,6 +391,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "num_lobes", "pin_circle_dia", "pin_dia", "eccentricity", "disc_thickness"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
@@ -433,6 +438,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "teeth_1", "shaft_angle", "face_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
@@ -516,6 +522,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "worm_starts", "worm_pitch_dia", "worm_length", "wheel_width"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
@@ -586,6 +593,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["knurl_type", "diameter", "length", "pitch", "depth"],
           "x-solidcraft-order": [
             "target_face", "base_plane", "knurl_type", "diameter", "length",
@@ -640,6 +648,7 @@
         ],
         "input_schema": {
           "type": "object",
+          "x-solidcraft-preview": "manual",
           "required": ["prefix", "num_slots", "center_distance", "pin_dia", "thickness"],
           "x-solidcraft-order": [
             "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
