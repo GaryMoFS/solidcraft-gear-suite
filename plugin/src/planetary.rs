@@ -232,6 +232,7 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.sun_bore,
             rim_val: 0.0,
+            preview_only: crate::is_preview(raw),
         },
     )?;
 
@@ -284,6 +285,7 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
                 shift_val: 0.0,
                 bore_val: inp.planet_bore,
                 rim_val: 0.0,
+                preview_only: crate::is_preview(raw),
             },
         )?;
         planets.push(pl);
@@ -323,6 +325,7 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: 0.0,
             rim_val: inp.ring_wall,
+            preview_only: crate::is_preview(raw),
         },
     )?;
 

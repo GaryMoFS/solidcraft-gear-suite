@@ -72,6 +72,7 @@ pub struct GearSpec<'a> {
     pub shift_val: f64,
     pub bore_val: f64,
     pub rim_val: f64,
+    pub preview_only: bool,
 }
 
 pub fn setup_transverse_params(
@@ -222,6 +223,52 @@ pub fn build_parametric_gear(
 
     let base_origin = spec.frame.origin_json(spec.offset_x_param);
     let axis_vec = json!([spec.frame.z_dir[0], spec.frame.z_dir[1], spec.frame.z_dir[2]]);
+
+    // Fast lightweight envelope preview (~50 ms per gear) when SolidCraft requests `_preview: true`.
+    if spec.preview_only {
+        let sk_prev = format!("{}_Prev", spec.sketch_name);
+        run_cmd(
+            "sketch.create",
+            json!({ "plane": spec.frame.plane_json(base_origin), "name": sk_prev }),
+        )?;
+        let (outer_d, inner_d) = if is_internal {
+            (2.0 * (r_out_val + spec.rim_val), 2.0 * r_in_val)
+        } else {
+            (2.0 * r_out_val, spec.bore_val)
+        };
+        run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": outer_d }))?;
+        if inner_d > 0.2 && inner_d < outer_d - 0.2 {
+            run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": inner_d }))?;
+        }
+        // Pitch circle construction wire so mating gear pitch tangency is immediately visible.
+        run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": pitch_dia, "construction": true }))?;
+        run_cmd("sketch.finish", json!({}))?;
+        let prof = pick_outer_profile_index(&sk_prev, inner_d > 0.2)?;
+        let ext = run_cmd(
+            "solid.extrude",
+            json!({
+                "sketch": sk_prev,
+                "profiles": [prof],
+                "distance": fw,
+                "operation": "new_body",
+                "body_name": spec.body_name,
+            }),
+        )?;
+        let actual_body = ext
+            .get("created_bodies")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+            .and_then(Value::as_str)
+            .unwrap_or(spec.body_name)
+            .to_string();
+        return Ok(json!({
+            "body": actual_body,
+            "preview": true,
+            "pitch_diameter_mm": pitch_dia,
+            "outer_diameter_mm": outer_d,
+            "root_diameter_mm": 2.0 * r_in_val,
+        }));
+    }
 
     // 1. Complete 2D gear cross-section sketch.
     run_cmd(
@@ -614,6 +661,7 @@ pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
             shift_val: inp.profile_shift,
             bore_val: inp.bore_diameter,
             rim_val: inp.rim_thickness,
+            preview_only: crate::is_preview(raw),
         },
     )?;
 
@@ -804,6 +852,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.bore_1,
             rim_val: 0.0,
+            preview_only: crate::is_preview(raw),
         },
     )?;
 
@@ -841,6 +890,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.bore_2,
             rim_val: 0.0,
+            preview_only: crate::is_preview(raw),
         },
     )?;
 

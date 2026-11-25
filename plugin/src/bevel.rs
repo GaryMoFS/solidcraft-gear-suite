@@ -180,8 +180,33 @@ fn build_single_bevel(
     hand_sign: f64,
     bore_dia: f64,
     body_name: &str,
+    preview_only: bool,
 ) -> Result<String, PluginError> {
     let bname = unique_name(body_name, existing_names);
+    if preview_only {
+        // Fast frustum cone preview (~80 ms) matching exact outer/inner bevel diameters & cone angle.
+        let z_out = re * libm::cos(delta_rad);
+        let z_in = ri * libm::cos(delta_rad);
+        let d_out = module * (teeth as f64 + 2.0);
+        let d_in = d_out * (ri / re);
+        let sk_o = unique_name(&format!("{prefix}_PrevOut"), existing_names);
+        let sk_i = unique_name(&format!("{prefix}_PrevIn"), existing_names);
+        run_cmd("sketch.create", json!({ "plane": frame.plane_json(json!(frame.world_point(0.0, 0.0, z_out))), "name": sk_o }))?;
+        run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": d_out }))?;
+        run_cmd("sketch.finish", json!({}))?;
+        run_cmd("sketch.create", json!({ "plane": frame.plane_json(json!(frame.world_point(0.0, 0.0, z_in))), "name": sk_i }))?;
+        run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": d_in }))?;
+        run_cmd("sketch.finish", json!({}))?;
+        let res = run_cmd(
+            "solid.loft",
+            json!({
+                "sections": [{ "sketch": sk_o, "profiles": [0] }, { "sketch": sk_i, "profiles": [0] }],
+                "operation": "new_body",
+                "body_name": bname,
+            }),
+        )?;
+        return Ok(res.get("created_bodies").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str).unwrap_or(&bname).to_string());
+    }
     let n_sections: usize = if is_spiral { 4 } else { 2 };
     let beta_rad = spiral_angle_deg * core::f64::consts::PI / 180.0;
     let spiral_k = if is_spiral {
@@ -325,6 +350,7 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
         hand1,
         inp.bore_1,
         &format!("{p}_BevelPinion"),
+        crate::is_preview(raw),
     )?;
 
     let phase2 = core::f64::consts::PI + core::f64::consts::PI / z2;
@@ -345,6 +371,7 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
         hand2,
         inp.bore_2,
         &format!("{p}_BevelGear"),
+        crate::is_preview(raw),
     )?;
 
     Ok(json!({

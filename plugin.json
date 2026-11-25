@@ -1,7 +1,7 @@
 {
   "id": "solidcraft-gear-suite",
   "name": "GM Gear Suite",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Complete Shwivel-style parametric gear & drive suite: Cylindrical (External/Internal, Straight/Helical/Herringbone), Parallel Pair, Planetary, Rack & Pinion, Cycloidal, Straight & Spiral Bevel, Worm Drive, Knurl, and Geneva Mechanism.",
   "capabilities": ["commands@0.2"],
   "runtime": {
@@ -48,12 +48,13 @@
           "x-solidcraft-preview": "manual",
           "required": ["gear_side", "tooth_type", "prefix", "module", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
+            "placement", "base_plane", "flip_direction", "axial_offset",
             "gear_side", "tooth_type", "helix_angle", "hand", "module_system",
             "prefix", "module", "teeth", "pressure_angle", "face_width",
             "bore_diameter", "rim_thickness", "profile_shift", "backlash", "body_name"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array",
               "title": "Placement Reference (optional)",
@@ -62,7 +63,6 @@
               "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string",
               "title": "Base Plane (if no pick)",
@@ -147,17 +147,17 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "teeth_1", "face_width"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "tooth_type", "helix_angle", "hand", "module_system",
             "prefix", "sizing_mode", "module", "teeth_1", "teeth_2", "gear_ratio", "pressure_angle", "face_width",
             "bore_1", "bore_2", "backlash", "backlash_mode"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Pinion Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -248,17 +248,17 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "sun_teeth", "num_planets", "face_width"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
+            "placement", "base_plane", "flip_direction", "axial_offset",
             "tooth_type", "helix_angle", "hand",
             "prefix", "sizing_mode", "module", "sun_teeth", "planet_teeth", "target_ratio", "num_planets", "pressure_angle",
             "face_width", "sun_bore", "planet_bore", "ring_wall", "backlash"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -333,16 +333,16 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "pinion_teeth", "face_width"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "prefix", "module", "pinion_teeth", "rack_sizing", "rack_teeth", "rack_length", "pressure_angle", "face_width",
             "rack_backing", "pinion_bore", "backlash"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Pinion Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -394,16 +394,16 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "num_lobes", "pin_circle_dia", "pin_dia", "eccentricity", "disc_thickness"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "flip_direction", "axial_offset",
+            "placement", "base_plane", "flip_direction", "axial_offset",
             "prefix", "num_lobes", "pin_circle_dia", "pin_dia", "eccentricity", "disc_thickness",
             "bore_dia", "output_hole_count", "output_hole_dia", "output_pcd", "include_pins"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -441,17 +441,17 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "teeth_1", "shaft_angle", "face_width"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "bevel_type", "spiral_angle", "hand",
             "prefix", "sizing_mode", "module", "teeth_1", "teeth_2", "gear_ratio", "shaft_angle", "pressure_angle",
             "face_width", "bore_1", "bore_2", "backlash"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Apex Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -525,16 +525,16 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "module", "worm_starts", "worm_pitch_dia", "worm_length", "wheel_width"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "prefix", "sizing_mode", "module", "worm_starts", "wheel_teeth", "gear_ratio", "worm_pitch_dia", "worm_length",
             "pressure_angle", "wheel_width", "worm_bore", "wheel_bore", "hand", "backlash"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [
@@ -600,6 +600,7 @@
             "pitch", "depth", "angle", "bore_diameter", "body_name"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "target_face": {
               "type": "array",
               "title": "Target Cylindrical Face (optional)",
@@ -651,16 +652,16 @@
           "x-solidcraft-preview": "manual",
           "required": ["prefix", "num_slots", "center_distance", "pin_dia", "thickness"],
           "x-solidcraft-order": [
-            "placement", "axis_name", "base_plane", "layout_angle", "flip_direction", "axial_offset",
+            "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "prefix", "num_slots", "center_distance", "pin_dia", "thickness",
             "clearance", "wheel_bore", "driver_bore", "include_driver"
           ],
           "properties": {
+            "_preview": { "type": "boolean", "default": false },
             "placement": {
               "type": "array", "title": "Wheel Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
             },
-            "axis_name": { "type": "string", "title": "Axis Name (optional)", "default": "" },
             "base_plane": {
               "type": "string", "title": "Base Plane (if no pick)",
               "oneOf": [

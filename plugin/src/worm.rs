@@ -152,68 +152,83 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
     let worm_sk = unique_name(&format!("{p}_WormProfile"), &mut existing_names);
     let worm_path = unique_name(&format!("{p}_WormAxis"), &mut existing_names);
     let worm_body = unique_name(&format!("{p}_Worm"), &mut existing_names);
+    let preview_only = crate::is_preview(raw);
 
-    run_cmd(
-        "sketch.create",
-        json!({ "plane": worm_frame.plane_json(json!(worm_origin)), "name": worm_sk }),
-    )?;
-    if inp.worm_bore > 0.0 {
-        run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": inp.worm_bore }))?;
+    if preview_only {
+        // Fast worm envelope cylinder (~30 ms)
+        run_cmd(
+            "solid.cylinder",
+            json!({
+                "radius": ra_worm,
+                "height": actual_worm_len,
+                "base": worm_origin,
+                "axis": [worm_frame.z_dir[0], worm_frame.z_dir[1], worm_frame.z_dir[2]],
+                "operation": "new_body",
+                "body_name": worm_body,
+            }),
+        )?;
+    } else {
+        run_cmd(
+            "sketch.create",
+            json!({ "plane": worm_frame.plane_json(json!(worm_origin)), "name": worm_sk }),
+        )?;
+        if inp.worm_bore > 0.0 {
+            run_cmd("sketch.circle.center", json!({ "center": [0.0, 0.0], "diameter": inp.worm_bore }))?;
+        }
+
+        // Build closed z1-start trapezoidal thread cross-section around [0, 0].
+        let n_starts = inp.worm_starts as usize;
+        let sector = 2.0 * core::f64::consts::PI / (n_starts as f64);
+        let mut pts: Vec<Value> = Vec::new();
+        for k in 0..n_starts {
+            let base_a = (k as f64) * sector;
+            let a0 = base_a - 0.35 * sector;
+            let a1 = base_a - 0.22 * sector;
+            let a2 = base_a - 0.12 * sector;
+            let a3 = base_a + 0.12 * sector;
+            let a4 = base_a + 0.22 * sector;
+            let a5 = base_a + 0.35 * sector;
+            let a6 = base_a + 0.50 * sector;
+            pts.push(json!([rf_worm * libm::cos(a0), rf_worm * libm::sin(a0)]));
+            pts.push(json!([rf_worm * libm::cos(a1), rf_worm * libm::sin(a1)]));
+            pts.push(json!([ra_worm * libm::cos(a2), ra_worm * libm::sin(a2)]));
+            pts.push(json!([ra_worm * libm::cos(a3), ra_worm * libm::sin(a3)]));
+            pts.push(json!([rf_worm * libm::cos(a4), rf_worm * libm::sin(a4)]));
+            pts.push(json!([rf_worm * libm::cos(a5), rf_worm * libm::sin(a5)]));
+            pts.push(json!([rf_worm * libm::cos(a6), rf_worm * libm::sin(a6)]));
+        }
+        run_cmd("sketch.line", json!({ "points": pts, "closed": true }))?;
+        run_cmd("sketch.finish", json!({}))?;
+        let worm_prof = pick_outer_profile_index(&worm_sk, false)?;
+
+        run_cmd(
+            "sketch.create",
+            json!({
+                "plane": {
+                    "origin": worm_origin,
+                    "x_dir": [worm_frame.x_dir[0], worm_frame.x_dir[1], worm_frame.x_dir[2]],
+                    "y_dir": [worm_frame.z_dir[0], worm_frame.z_dir[1], worm_frame.z_dir[2]],
+                },
+                "name": worm_path,
+            }),
+        )?;
+        let lres = run_cmd("sketch.line", json!({ "points": [[0.0, 0.0], [0.0, actual_worm_len]] }))?;
+        let pcurve = extract_created_curve_id(&lres, "worm axis")?;
+        run_cmd("sketch.finish", json!({}))?;
+
+        run_cmd(
+            "solid.sweep",
+            json!({
+                "sketch": worm_sk,
+                "profiles": [worm_prof],
+                "path_sketch": worm_path,
+                "path": [pcurve],
+                "twist": format!("{} deg", fmt_num(twist_deg)),
+                "operation": "new_body",
+                "body_name": worm_body,
+            }),
+        )?;
     }
-
-    // Build closed z1-start trapezoidal thread cross-section around [0, 0].
-    let n_starts = inp.worm_starts as usize;
-    let sector = 2.0 * core::f64::consts::PI / (n_starts as f64);
-    let mut pts: Vec<Value> = Vec::new();
-    for k in 0..n_starts {
-        let base_a = (k as f64) * sector;
-        // Root arc / lobe profile per start (8 points per start -> smooth & watertight)
-        let a0 = base_a - 0.35 * sector;
-        let a1 = base_a - 0.22 * sector;
-        let a2 = base_a - 0.12 * sector;
-        let a3 = base_a + 0.12 * sector;
-        let a4 = base_a + 0.22 * sector;
-        let a5 = base_a + 0.35 * sector;
-        let a6 = base_a + 0.50 * sector;
-        pts.push(json!([rf_worm * libm::cos(a0), rf_worm * libm::sin(a0)]));
-        pts.push(json!([rf_worm * libm::cos(a1), rf_worm * libm::sin(a1)]));
-        pts.push(json!([ra_worm * libm::cos(a2), ra_worm * libm::sin(a2)]));
-        pts.push(json!([ra_worm * libm::cos(a3), ra_worm * libm::sin(a3)]));
-        pts.push(json!([rf_worm * libm::cos(a4), rf_worm * libm::sin(a4)]));
-        pts.push(json!([rf_worm * libm::cos(a5), rf_worm * libm::sin(a5)]));
-        pts.push(json!([rf_worm * libm::cos(a6), rf_worm * libm::sin(a6)]));
-    }
-    run_cmd("sketch.line", json!({ "points": pts, "closed": true }))?;
-    run_cmd("sketch.finish", json!({}))?;
-    let worm_prof = pick_outer_profile_index(&worm_sk, false)?;
-
-    run_cmd(
-        "sketch.create",
-        json!({
-            "plane": {
-                "origin": worm_origin,
-                "x_dir": [worm_frame.x_dir[0], worm_frame.x_dir[1], worm_frame.x_dir[2]],
-                "y_dir": [worm_frame.z_dir[0], worm_frame.z_dir[1], worm_frame.z_dir[2]],
-            },
-            "name": worm_path,
-        }),
-    )?;
-    let lres = run_cmd("sketch.line", json!({ "points": [[0.0, 0.0], [0.0, actual_worm_len]] }))?;
-    let pcurve = extract_created_curve_id(&lres, "worm axis")?;
-    run_cmd("sketch.finish", json!({}))?;
-
-    run_cmd(
-        "solid.sweep",
-        json!({
-            "sketch": worm_sk,
-            "profiles": [worm_prof],
-            "path_sketch": worm_path,
-            "path": [pcurve],
-            "twist": format!("{} deg", fmt_num(twist_deg)),
-            "operation": "new_body",
-            "body_name": worm_body,
-        }),
-    )?;
 
     // 2. Build mating Helical Worm Wheel at x = cd_p, axis along frame.z_dir, helix angle = lead_angle!
     let wheel_sk = unique_name(&format!("{p}_WheelSketch"), &mut existing_names);
@@ -249,6 +264,7 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.wheel_bore,
             rim_val: 0.0,
+            preview_only,
         },
     )?;
 

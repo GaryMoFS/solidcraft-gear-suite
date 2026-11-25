@@ -140,11 +140,13 @@ pub fn run_knurl(raw: &Value) -> Result<String, PluginError> {
     let mut frame = resolve_placement(&inp.target_face, "", &inp.base_plane, false, 0.0, 0.0)?;
     let mut diameter = inp.diameter;
     let length = inp.length;
+    let mut target_body: Option<String> = None;
 
-    // If a cylindrical face was picked, automatically adopt its exact diameter, origin, and axis!
+    // If a cylindrical face was picked, automatically adopt its exact diameter, origin, axis, and target body!
     if let Some(pick) = inp.target_face.first() {
         if pick.get("type").and_then(Value::as_str) == Some("face") {
             if let Some(body) = pick.get("body").and_then(Value::as_str) {
+                target_body = Some(body.to_string());
                 if let Ok(faces_res) = run_cmd("model.faces", json!({ "body": body })) {
                     if let Some(faces) = faces_res.get("faces").and_then(Value::as_array) {
                         let idx = pick.get("index").and_then(Value::as_u64);
@@ -188,34 +190,36 @@ pub fn run_knurl(raw: &Value) -> Result<String, PluginError> {
         inp.body_name.trim()
     };
 
-    let final_body = match inp.knurl_type.as_str() {
-        "straight" => build_knurl_pass(
+    let preview_only = crate::is_preview(raw);
+    let knurl_body = if preview_only {
+        // Fast single straight-flute preview (~0.4s instead of ~17s for full 3D diamond sweep+intersect).
+        build_knurl_pass(
             &mut existing_names,
             frame,
             r_outer,
             r_root,
             inp.bore_diameter,
             length,
-            teeth,
+            teeth.min(36),
             0.0,
-            "kn",
+            "kn_prev",
             desired,
-        )?,
-        "diagonal" => build_knurl_pass(
-            &mut existing_names,
-            frame,
-            r_outer,
-            r_root,
-            inp.bore_diameter,
-            length,
-            teeth,
-            twist_mag,
-            "kn",
-            desired,
-        )?,
-        _ => {
-            // Diamond knurl: intersect RH and LH twisted sawtooth cylinders -> true 3D diamond pyramids!
-            let b_rh = build_knurl_pass(
+        )?
+    } else {
+        match inp.knurl_type.as_str() {
+            "straight" => build_knurl_pass(
+                &mut existing_names,
+                frame,
+                r_outer,
+                r_root,
+                inp.bore_diameter,
+                length,
+                teeth,
+                0.0,
+                "kn",
+                desired,
+            )?,
+            "diagonal" => build_knurl_pass(
                 &mut existing_names,
                 frame,
                 r_outer,
@@ -224,32 +228,63 @@ pub fn run_knurl(raw: &Value) -> Result<String, PluginError> {
                 length,
                 teeth,
                 twist_mag,
-                "kn_rh",
+                "kn",
                 desired,
-            )?;
-            let b_lh = build_knurl_pass(
-                &mut existing_names,
-                frame,
-                r_outer,
-                r_root,
-                inp.bore_diameter,
-                length,
-                teeth,
-                -twist_mag,
-                "kn_lh",
-                &format!("{desired}_LH"),
-            )?;
-            run_cmd(
-                "solid.combine",
-                json!({
-                    "target": &b_rh,
-                    "tools": [&b_lh],
-                    "operation": "intersect",
-                    "keep_tools": false,
-                }),
-            )?;
-            b_rh
+            )?,
+            _ => {
+                // Diamond knurl: intersect RH and LH twisted sawtooth cylinders -> true 3D diamond pyramids!
+                let b_rh = build_knurl_pass(
+                    &mut existing_names,
+                    frame,
+                    r_outer,
+                    r_root,
+                    inp.bore_diameter,
+                    length,
+                    teeth,
+                    twist_mag,
+                    "kn_rh",
+                    desired,
+                )?;
+                let b_lh = build_knurl_pass(
+                    &mut existing_names,
+                    frame,
+                    r_outer,
+                    r_root,
+                    inp.bore_diameter,
+                    length,
+                    teeth,
+                    -twist_mag,
+                    "kn_lh",
+                    &format!("{desired}_LH"),
+                )?;
+                run_cmd(
+                    "solid.combine",
+                    json!({
+                        "target": &b_rh,
+                        "tools": [&b_lh],
+                        "operation": "intersect",
+                        "keep_tools": false,
+                    }),
+                )?;
+                b_rh
+            }
         }
+    };
+
+    // If a cylindrical face on an existing body was picked, intersect directly onto that body so the knurl is visible on it!
+    let final_body = if let Some(tb) = target_body {
+        run_cmd(
+            "solid.combine",
+            json!({
+                "target": &tb,
+                "tools": [&knurl_body],
+                "operation": "intersect",
+                "keep_tools": false,
+            }),
+        )?;
+        tb
+    } else {
+        knurl_body
     };
 
     Ok(json!({
