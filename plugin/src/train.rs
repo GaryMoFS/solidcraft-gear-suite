@@ -88,13 +88,63 @@ impl Default for GearTrainInput {
 }
 
 /// Split `total_ratio` across `num_stages` balanced `(zp, zg)` tooth pairs.
+/// When `coaxial_folded` is true, ALL stages are constrained to the exact same tooth sum
+/// `zp + zg = Z_sum` so every shaft in a folded 2-shaft gearbox is 100% coaxial!
 pub fn split_train_stages(
     num_stages: u32,
     total_ratio: f64,
     min_pinion: u32,
     max_gear: u32,
+    coaxial_folded: bool,
 ) -> Vec<(u32, u32)> {
     let n = num_stages.clamp(2, 4);
+    if coaxial_folded {
+        let ideal_u = libm::pow(total_ratio.max(1.5), 1.0 / (n as f64));
+        let base_zp = min_pinion;
+        let base_zg = (libm::round(base_zp as f64 * ideal_u) as u32).clamp(base_zp, max_gear);
+        let center_sum = base_zp + base_zg;
+        let lo_sum = center_sum.saturating_sub(6).max(2 * min_pinion);
+        let hi_sum = (center_sum + 8).min(min_pinion + max_gear);
+
+        let mut best_stages: Vec<(u32, u32)> = Vec::new();
+        let mut best_total_err = f64::MAX;
+
+        for z_sum in lo_sum..=hi_sum {
+            let mut cand = Vec::with_capacity(n as usize);
+            let mut rem = total_ratio.max(1.5);
+            let mut valid = true;
+            for i in 0..n {
+                let left = (n - i) as f64;
+                let target_u = libm::pow(rem, 1.0 / left);
+                // Solve zp + zg = z_sum, zg / zp ≈ target_u => zp ≈ z_sum / (1 + target_u)
+                let ideal_zp = libm::round((z_sum as f64) / (1.0 + target_u)) as u32;
+                let max_zp = (z_sum / 2).min(max_gear);
+                let min_zp = min_pinion.max(z_sum.saturating_sub(max_gear));
+                if min_zp > max_zp {
+                    valid = false;
+                    break;
+                }
+                let zp = ideal_zp.clamp(min_zp, max_zp);
+                let zg = z_sum - zp;
+                let u = zg as f64 / zp as f64;
+                rem = (rem / u).max(1.0);
+                cand.push((zp, zg));
+            }
+            if !valid {
+                continue;
+            }
+            let prod: f64 = cand.iter().map(|&(p, g)| g as f64 / p as f64).product();
+            let err = libm::fabs(prod - total_ratio) / total_ratio;
+            if err < best_total_err {
+                best_total_err = err;
+                best_stages = cand;
+            }
+        }
+        if !best_stages.is_empty() {
+            return best_stages;
+        }
+    }
+
     let mut stages = Vec::with_capacity(n as usize);
     let mut rem_ratio = total_ratio.max(1.5);
 
@@ -102,10 +152,12 @@ pub fn split_train_stages(
         let stages_left = (n - i) as f64;
         let target_u = libm::pow(rem_ratio, 1.0 / stages_left);
 
-        let mut best_pair = (min_pinion, (libm::round(min_pinion as f64 * target_u) as u32).clamp(min_pinion, max_gear));
+        let mut best_pair = (
+            min_pinion,
+            (libm::round(min_pinion as f64 * target_u) as u32).clamp(min_pinion, max_gear),
+        );
         let mut best_err = f64::MAX;
 
-        // Search a small window around min_pinion to hit the target ratio accurately.
         let p_hi = (min_pinion + 4).min(max_gear);
         for zp in min_pinion..=p_hi {
             let zg = (libm::round(zp as f64 * target_u) as u32).clamp(zp, max_gear);
@@ -161,11 +213,13 @@ pub fn run_gear_train(raw: &Value) -> Result<String, PluginError> {
     }
 
     crate::report_progress(0.05, "Solving multi-stage gear train ratios")?;
+    let folded = inp.layout_style == "folded";
     let stages = split_train_stages(
         inp.num_stages,
         inp.total_ratio,
         inp.min_pinion_teeth,
         inp.max_gear_teeth,
+        folded,
     );
     let tooth_kind = ToothKind::parse(&inp.tooth_type);
     let hand_sign_base = if inp.hand == "left" { -1.0 } else { 1.0 };
@@ -211,7 +265,6 @@ pub fn run_gear_train(raw: &Value) -> Result<String, PluginError> {
     )?;
 
     let preview_only = crate::is_preview(raw);
-    let folded = inp.layout_style == "folded";
     let mut shaft_x_mm = 0.0_f64;
     let mut dir_sign = 1.0_f64;
     let mut actual_total_ratio = 1.0_f64;
