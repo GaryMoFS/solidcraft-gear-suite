@@ -97,6 +97,12 @@ $dst = Join-Path $env:LOCALAPPDATA "SolidCraft\plugins\solidcraft-gear-suite"
 
 > **Tip:** To run targeted custom test cases without polluting the installed plugin folder, copy `dist\solidcraft-gear-suite\*` into a temporary folder, add `tests\<case>.json` files (`{"entry":"...","params":{...}}` written as **UTF-8 without BOM**), and run `& $cli plugin test <temp-dir> --json --out <out-dir>`.
 
+> **Full-geometry check:** every entry's `fast_preview` defaults to `true`, so the built-in default cases only build preview envelopes. Before a release, also add one case per entry with `"fast_preview": false` (for `gm-knurl`, also pass its required `knurl_type`, `diameter`, `length`, `pitch` and `depth`, or the harness rejects the case).
+
+> **Packager after a folder move:** the packager finds the repo through `CARGO_MANIFEST_DIR`, which is fixed at compile time. If the repo moves, `touch packager/src/main.rs` before `cargo run`.
+
+> **WIT:** keep `wit/plugin.wit` byte-identical to the host's `crates/craft-plugin/wit/plugin.wit`. ACO's maintenance run flags any plugin whose WIT hash differs from a new SolidCraft trial.
+
 ---
 
 ## 4. SolidCraft Host Compatibility & Optional Dialog Tabs Patch

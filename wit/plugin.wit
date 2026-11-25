@@ -381,8 +381,3 @@ world command-dialog-plugin {
     include command-plugin;
     export dialog-provider;
 }
-
-world panel-dialog-plugin {
-    include panel-plugin;
-    export dialog-provider;
-}
