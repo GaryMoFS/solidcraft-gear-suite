@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     let (pkg_id, _) = resolve
         .push_path(&wit_path)
         .with_context(|| format!("parse {}", wit_path.display()))?;
-    let world_id = resolve.select_world(&[pkg_id], Some("panel-dialog-plugin"))?;
+    let world_id = resolve.select_world(&[pkg_id], Some("command-dialog-plugin"))?;
 
     wit_component::embed_component_metadata(&mut wasm_bytes, &resolve, world_id, StringEncoding::UTF8)?;
     let component = ComponentEncoder::default()

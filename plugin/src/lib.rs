@@ -30,7 +30,7 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 wit_bindgen::generate!({
     path: "../wit/plugin.wit",
-    world: "panel-dialog-plugin",
+    world: "command-dialog-plugin",
 });
 
 use craft::plugin::commands;
@@ -38,7 +38,6 @@ use craft::plugin::control;
 pub use craft::plugin::types::{FieldFailure, PluginError};
 use exports::craft::plugin::dialog_provider::Guest as DialogGuest;
 use exports::craft::plugin::entry::Guest as EntryGuest;
-use exports::craft::plugin::ui_provider::Guest as UiGuest;
 
 struct GearSuitePlugin;
 
@@ -60,24 +59,6 @@ impl EntryGuest for GearSuitePlugin {
             "gm-geneva" => geneva::run_geneva(&value),
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
-    }
-}
-
-impl UiGuest for GearSuitePlugin {
-    fn describe() -> craft::plugin::ui::Declarations {
-        panel::describe_panel()
-    }
-
-    fn on_event(_event: craft::plugin::ui::UiEvent) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn on_enter(_workspace: String) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    fn on_exit(_workspace: String) -> Result<(), PluginError> {
-        Ok(())
     }
 }
 

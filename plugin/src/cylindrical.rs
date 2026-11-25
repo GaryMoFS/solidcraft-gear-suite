@@ -592,6 +592,9 @@ struct CylindricalGearInput {
     profile_shift: f64,
     backlash: f64,
     root_fillet: bool,
+    material: String,
+    input_torque_nm: f64,
+    input_rpm: f64,
     body_name: String,
 }
 
@@ -621,6 +624,9 @@ impl Default for CylindricalGearInput {
             profile_shift: 0.0,
             backlash: 0.05,
             root_fillet: false,
+            material: "steel_1045".into(),
+            input_torque_nm: 0.0,
+            input_rpm: 0.0,
             body_name: "GM_Gear".into(),
         }
     }
@@ -757,20 +763,10 @@ pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
         inp.profile_shift,
         inp.face_width,
         0.0,
-        "steel_1045",
-        0.0,
-        0.0,
+        &inp.material,
+        inp.input_torque_nm,
+        inp.input_rpm,
     );
-    if !crate::is_preview(raw) {
-        crate::panel::publish_single_gear_report(
-            &format!("{body_name} ({} {})", inp.gear_side, inp.tooth_type),
-            inp.module,
-            mt_val,
-            inp.teeth,
-            inp.pressure_angle,
-            &mesh,
-        );
-    }
     crate::report_progress(1.0, "Cylindrical gear complete")?;
 
     Ok(json!({
@@ -1083,16 +1079,6 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         },
     )?;
 
-    if !crate::is_preview(raw) {
-        crate::panel::publish_pair_report(
-            &format!("{p} ({} pair)", inp.tooth_type),
-            inp.module,
-            mt_val,
-            inp.teeth_1,
-            inp.teeth_2,
-            &mesh,
-        );
-    }
     crate::report_progress(1.0, "Parallel gear pair complete")?;
     Ok(json!({
         "mode": "gm-parallel-pair",

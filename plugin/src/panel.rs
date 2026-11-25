@@ -1,335 +1,110 @@
-//! Docked tabbed `GM Gear Engineering` panel (`ui@0.1`) and live dialog hints (`dialog@0.1`).
+//! Smart `dialog@0.1` engineering hook for GM Gear Suite.
+//! Computes material-aware defaults (backlash, root fillet, anti-undercut profile shift,
+//! and load-based ISO 54 module / face-width recommendations) plus live engineering hints.
+//! Note: SolidCraft's `dialog@0.1` host never overwrites a field the user manually edited.
 
 use alloc::format;
-use alloc::string::String;
-use alloc::vec;
-use alloc::vec::Vec;
 use serde_json::{Map, Value, json};
 
-use crate::craft::plugin::types::{Datum, Value as UiValue};
-use crate::craft::plugin::ui::{
-    self, Column, Declarations, DockZone, Layout, Node, PanelSpec, SelectionMode, Tab, TableSpec,
-    Widget,
-};
 use crate::solver;
 
-pub const PANEL_ID: &str = "gm-engineering";
-
-/// Static panel declaration — must match `runtime.ui` in `plugin.json` verbatim.
-pub fn describe_panel() -> Declarations {
-    Declarations {
-        ui_version: 1,
-        panels: vec![PanelSpec {
-            id: PANEL_ID.into(),
-            title: "GM Gear Engineering".into(),
-            zones: vec![DockZone::Right, DockZone::Bottom],
-            layout: Layout {
-                root: 0,
-                nodes: vec![
-                    Node {
-                        widget: Widget::Tabs(vec![
-                            Tab {
-                                label: "Geometry".into(),
-                                child: 1,
-                            },
-                            Tab {
-                                label: "Strength & Safety".into(),
-                                child: 2,
-                            },
-                            Tab {
-                                label: "Warnings".into(),
-                                child: 3,
-                            },
-                        ]),
-                    },
-                    Node {
-                        widget: Widget::Table(TableSpec {
-                            bind: "/geometry".into(),
-                            row_id: "id".into(),
-                            columns: vec![
-                                Column {
-                                    key: "metric".into(),
-                                    label: "Parameter".into(),
-                                    unit: None,
-                                },
-                                Column {
-                                    key: "value".into(),
-                                    label: "Value".into(),
-                                    unit: None,
-                                },
-                            ],
-                            select: SelectionMode::None,
-                            on_select: None,
-                            on_edit: None,
-                        }),
-                    },
-                    Node {
-                        widget: Widget::Table(TableSpec {
-                            bind: "/strength".into(),
-                            row_id: "id".into(),
-                            columns: vec![
-                                Column {
-                                    key: "metric".into(),
-                                    label: "Check".into(),
-                                    unit: None,
-                                },
-                                Column {
-                                    key: "value".into(),
-                                    label: "Value".into(),
-                                    unit: None,
-                                },
-                            ],
-                            select: SelectionMode::None,
-                            on_select: None,
-                            on_edit: None,
-                        }),
-                    },
-                    Node {
-                        widget: Widget::Table(TableSpec {
-                            bind: "/warnings".into(),
-                            row_id: "id".into(),
-                            columns: vec![
-                                Column {
-                                    key: "level".into(),
-                                    label: "Status".into(),
-                                    unit: None,
-                                },
-                                Column {
-                                    key: "message".into(),
-                                    label: "Engineering Note".into(),
-                                    unit: None,
-                                },
-                            ],
-                            select: SelectionMode::None,
-                            on_select: None,
-                            on_edit: None,
-                        }),
-                    },
-                ],
-            },
-        }],
-        workspaces: vec![],
+/// Recommended backlash (mm) and root-fillet default for each material preset.
+fn material_smart_defaults(material_id: &str) -> (f64, bool, &'static str) {
+    match material_id {
+        "petg_3d" => (0.20, false, "FDM 3D-print clearance (0.20 mm)"),
+        "pom_delrin" => (0.08, false, "POM / Delrin clearance (0.08 mm)"),
+        "pa66_nylon" => (0.08, false, "PA66 Nylon clearance (0.08 mm)"),
+        "peek" => (0.06, false, "PEEK precision clearance (0.06 mm)"),
+        "brass_c360" => (0.06, false, "Brass C360 clearance (0.06 mm)"),
+        "steel_4140" => (0.05, true, "Steel 4140 QT (0.05 mm + 0.3m root fillet)"),
+        _ => (0.05, true, "Steel 1045 (0.05 mm + 0.3m root fillet)"),
     }
 }
 
-/// Push engineering rows into the docked `GM Gear Engineering` panel.
-/// Silently no-ops on headless hosts where panel UI is unavailable.
-pub fn publish_panel(
-    geometry_rows: &[(String, String)],
-    strength_rows: &[(String, String)],
-    warning_rows: &[(String, String)],
-) {
-    let mut datums: Vec<Datum> = Vec::new();
-    for (i, (metric, val)) in geometry_rows.iter().enumerate() {
-        datums.push(Datum {
-            path: format!("/geometry/{i}/id"),
-            value: UiValue::Text(format!("g{i}")),
-        });
-        datums.push(Datum {
-            path: format!("/geometry/{i}/metric"),
-            value: UiValue::Text(metric.clone()),
-        });
-        datums.push(Datum {
-            path: format!("/geometry/{i}/value"),
-            value: UiValue::Text(val.clone()),
-        });
-    }
-    for (i, (metric, val)) in strength_rows.iter().enumerate() {
-        datums.push(Datum {
-            path: format!("/strength/{i}/id"),
-            value: UiValue::Text(format!("s{i}")),
-        });
-        datums.push(Datum {
-            path: format!("/strength/{i}/metric"),
-            value: UiValue::Text(metric.clone()),
-        });
-        datums.push(Datum {
-            path: format!("/strength/{i}/value"),
-            value: UiValue::Text(val.clone()),
-        });
-    }
-    if warning_rows.is_empty() {
-        datums.push(Datum {
-            path: "/warnings/0/id".into(),
-            value: UiValue::Text("w0".into()),
-        });
-        datums.push(Datum {
-            path: "/warnings/0/level".into(),
-            value: UiValue::Text("OK".into()),
-        });
-        datums.push(Datum {
-            path: "/warnings/0/message".into(),
-            value: UiValue::Text("No engineering warnings.".into()),
-        });
-    } else {
-        for (i, (lvl, msg)) in warning_rows.iter().enumerate() {
-            datums.push(Datum {
-                path: format!("/warnings/{i}/id"),
-                value: UiValue::Text(format!("w{i}")),
-            });
-            datums.push(Datum {
-                path: format!("/warnings/{i}/level"),
-                value: UiValue::Text(lvl.clone()),
-            });
-            datums.push(Datum {
-                path: format!("/warnings/{i}/message"),
-                value: UiValue::Text(msg.clone()),
-            });
-        }
-    }
-
-    let _ = ui::clear_data(PANEL_ID);
-    if ui::set_data(PANEL_ID, &datums).is_ok() {
-        let _ = ui::show_panel(PANEL_ID, true);
-    }
-}
-
-/// Publish a `MeshSolution` for a parallel gear pair to the docked panel.
-pub fn publish_pair_report(
-    label: &str,
-    m_n: f64,
-    m_t: f64,
+/// Find the smallest ISO 54 Series 1 module (with b = 10*m) that achieves SF >= 1.5 and SH >= 1.2.
+#[allow(clippy::too_many_arguments)]
+fn recommend_module_for_load(
     z1: u32,
     z2: u32,
-    r: &solver::MeshSolution,
-) {
-    let ratio = z2 as f64 / z1 as f64;
-    let mut geo = vec![
-        ("Gear Set".into(), label.into()),
-        (
-            "Module (normal / transv.)".into(),
-            format!("{m_n:.3} mm / {m_t:.3} mm"),
-        ),
-        (
-            "Teeth (z1 / z2) & Ratio".into(),
-            format!("{z1} / {z2}  (u = {ratio:.3}:1)"),
-        ),
-        (
-            "Pitch Dia (d1 / d2)".into(),
-            format!("{:.3} mm / {:.3} mm", m_t * z1 as f64, m_t * z2 as f64),
-        ),
-        (
-            "Center Distance (std -> op)".into(),
-            format!(
-                "{:.3} mm -> {:.4} mm",
-                r.standard_center_distance_mm, r.operating_center_distance_mm
-            ),
-        ),
-        (
-            "Operating Pressure Angle".into(),
-            format!("{:.3} deg", r.operating_pressure_angle_deg),
-        ),
-        (
-            "Contact Ratio (eps_a / eps_b / tot)".into(),
-            format!(
-                "{:.3} / {:.3} / {:.3}",
-                r.contact_ratio_transverse, r.contact_ratio_overlap, r.contact_ratio_total
-            ),
-        ),
-        (
-            "Face Width Ratio (b / mn)".into(),
-            format!("{:.2}", r.face_width_ratio),
-        ),
-    ];
-    if r.tip_shortening_mm > 1e-4 {
-        geo.push((
-            "Tip Shortening".into(),
-            format!("{:.4} mm", r.tip_shortening_mm),
-        ));
+    alpha_n_deg: f64,
+    beta_deg: f64,
+    is_normal: bool,
+    x1: f64,
+    x2: f64,
+    material_id: &str,
+    torque_nm: f64,
+    rpm: f64,
+) -> (f64, f64) {
+    let cos_b = libm::cos(beta_deg.to_radians());
+    for &m_cand in solver::ISO54_SERIES1 {
+        let (mt, at_deg) = if beta_deg <= 0.1 || !is_normal {
+            (m_cand, alpha_n_deg)
+        } else {
+            (
+                m_cand / cos_b,
+                libm::atan(libm::tan(alpha_n_deg.to_radians()) / cos_b).to_degrees(),
+            )
+        };
+        let fw = (10.0 * m_cand).clamp(2.0, 500.0);
+        let sol = solver::solve_external_pair(
+            m_cand,
+            mt,
+            z1,
+            z2,
+            alpha_n_deg,
+            at_deg,
+            beta_deg,
+            x1,
+            x2,
+            fw,
+            0.0,
+            material_id,
+            torque_nm,
+            rpm,
+        );
+        if let Some(s) = sol.strength {
+            let sfb = s
+                .get("bending_safety_factor")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let sfh = s
+                .get("contact_safety_factor")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            if sfb >= 1.5 && sfh >= 1.2 {
+                return (m_cand, fw);
+            }
+        }
     }
-
-    let strength = if let Some(s) = &r.strength {
-        let mat = s.get("material").and_then(Value::as_str).unwrap_or("—");
-        let ft = s.get("tangential_load_n").and_then(Value::as_f64).unwrap_or(0.0);
-        let vmps = s.get("pitch_line_velocity_mps").and_then(Value::as_f64).unwrap_or(0.0);
-        let sb = s.get("lewis_bending_mpa").and_then(Value::as_f64).unwrap_or(0.0);
-        let sfb = s.get("bending_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
-        let sh = s.get("hertz_contact_mpa").and_then(Value::as_f64).unwrap_or(0.0);
-        let sfh = s.get("contact_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
-        vec![
-            ("Material".into(), mat.into()),
-            ("Tangential Force (Ft)".into(), format!("{ft:.1} N")),
-            ("Pitch Line Velocity".into(), format!("{vmps:.2} m/s")),
-            (
-                "Lewis Bending Stress".into(),
-                format!("{sb:.1} MPa  (SF = {sfb:.2})"),
-            ),
-            (
-                "Hertzian Contact Stress".into(),
-                format!("{sh:.1} MPa  (SH = {sfh:.2})"),
-            ),
-            (
-                "Preliminary Verdict".into(),
-                if sfb >= 1.5 && sfh >= 1.2 {
-                    "PASS (preliminary)".into()
-                } else if sfb >= 1.0 && sfh >= 1.0 {
-                    "MARGINAL (review load / face width)".into()
-                } else {
-                    "UNDER-RATED (increase m, b, or material)".into()
-                },
-            ),
-        ]
-    } else {
-        vec![(
-            "Strength Check".into(),
-            "Set Input Torque > 0 N·m to run Lewis/Hertz check.".into(),
-        )]
-    };
-
-    let warnings: Vec<(String, String)> = r
-        .warnings
-        .iter()
-        .map(|w| ("WARN".into(), w.clone()))
-        .collect();
-
-    publish_panel(&geo, &strength, &warnings);
+    (20.0, 200.0)
 }
 
-/// Publish single cylindrical gear geometry & warnings to the docked panel.
-pub fn publish_single_gear_report(
-    label: &str,
-    m_n: f64,
-    m_t: f64,
-    z: u32,
-    alpha_deg: f64,
-    r: &solver::MeshSolution,
-) {
-    let d = m_t * z as f64;
-    let geo = vec![
-        ("Gear".into(), label.into()),
-        (
-            "Module (normal / transv.)".into(),
-            format!("{m_n:.3} mm / {m_t:.3} mm"),
-        ),
-        ("Teeth (z)".into(), format!("{z}")),
-        ("Pitch Diameter (d)".into(), format!("{d:.3} mm")),
-        ("Pressure Angle".into(), format!("{alpha_deg:.2} deg")),
-        (
-            "Undercut Limit (z_min)".into(),
-            format!("{:.1} (x_min = {:.2})", r.z1_min_no_undercut, r.x1_min_recommended),
-        ),
-        (
-            "Face Width Ratio (b / mn)".into(),
-            format!("{:.2}", r.face_width_ratio),
-        ),
-    ];
-    let strength = vec![(
-        "Strength Check".into(),
-        "Use GM Parallel Pair with Input Torque > 0 N·m for Lewis/Hertz check.".into(),
-    )];
-    let warnings: Vec<(String, String)> = r
-        .warnings
-        .iter()
-        .map(|w| ("WARN".into(), w.clone()))
-        .collect();
-    publish_panel(&geo, &strength, &warnings);
+fn round2(v: f64) -> f64 {
+    libm::round(v * 100.0) / 100.0
 }
 
-/// Live `dialog@0.1` hook: computes real-time engineering hints as the user edits dialog fields.
+/// Live `dialog@0.1` hook: computes material-smart defaults and live engineering hints.
 pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
     let mut patches = Map::new();
+
+    // Shared material-driven backlash default for any gear tool that exposes `material` + `backlash`.
+    let mat = values
+        .get("material")
+        .and_then(Value::as_str)
+        .unwrap_or("steel_1045");
+    let (smart_bl, smart_fillet, mat_note) = material_smart_defaults(mat);
+
     match entry {
         "gm-cylindrical-gear" => {
+            patches.insert(
+                "backlash".into(),
+                json!({ "default": smart_bl, "hint": mat_note }),
+            );
+            patches.insert(
+                "root_fillet".into(),
+                json!({ "default": smart_fillet }),
+            );
+
             let sizing_unit = values
                 .get("sizing_unit")
                 .and_then(Value::as_str)
@@ -379,12 +154,23 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
                 .get("gear_side")
                 .and_then(Value::as_str)
                 .unwrap_or("external");
+            let torque = values
+                .get("input_torque_nm")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            let rpm = values
+                .get("input_rpm")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
 
             let cos_b = libm::cos(beta.to_radians());
-            let m_t = if tooth_type == "straight" || mod_sys == "transverse" {
-                m_n
+            let (m_t, at_deg) = if tooth_type == "straight" || mod_sys == "transverse" {
+                (m_n, alpha)
             } else {
-                m_n / cos_b
+                (
+                    m_n / cos_b,
+                    libm::atan(libm::tan(alpha.to_radians()) / cos_b).to_degrees(),
+                )
             };
             let d = m_t * (z as f64);
             let da = if gear_side == "internal" {
@@ -398,7 +184,31 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
                 d - 2.0 * m_n * (1.25 - x)
             };
 
-            if sizing_unit == "dp" {
+            if torque > 0.0 && sizing_unit == "module" {
+                let (rec_m, rec_fw) = recommend_module_for_load(
+                    z,
+                    z,
+                    alpha,
+                    beta,
+                    mod_sys == "normal",
+                    x,
+                    x,
+                    mat,
+                    torque,
+                    rpm,
+                );
+                patches.insert(
+                    "module".into(),
+                    json!({
+                        "default": rec_m,
+                        "hint": format!("Smart ISO 54 sizing for {torque:.1} N·m: m >= {rec_m} mm, b >= {rec_fw:.0} mm")
+                    }),
+                );
+                patches.insert(
+                    "face_width".into(),
+                    json!({ "default": rec_fw }),
+                );
+            } else if sizing_unit == "dp" {
                 patches.insert(
                     "diametral_pitch".into(),
                     json!({ "hint": format!("Equivalent module m = {m_n:.3} mm") }),
@@ -426,24 +236,52 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
             if gear_side == "external" {
                 let sin_a = libm::sin(alpha.to_radians());
                 let z_min = (2.0 / (sin_a * sin_a)) * cos_b * cos_b * cos_b;
-                let x_min = (z_min - z as f64) / z_min;
-                if (z as f64) < z_min && x < x_min - 0.02 {
+                let x_min = ((z_min - z as f64) / z_min).max(0.0);
+                if (z as f64) < z_min {
+                    let rec_x = round2(x_min).clamp(0.0, 1.0);
                     patches.insert(
                         "profile_shift".into(),
-                        json!({ "hint": format!("Undercut risk (z < {z_min:.1}): recommend x >= +{x_min:.2}") }),
+                        json!({
+                            "default": rec_x,
+                            "hint": format!("Undercut guard (z < {z_min:.1}): auto-suggested x = +{rec_x:.2}")
+                        }),
                     );
                 }
             }
 
-            let bm = fw / m_n;
-            if bm < 5.0 || bm > 16.0 {
-                patches.insert(
-                    "face_width".into(),
-                    json!({ "hint": format!("b/m = {bm:.1} (typical range: 6..15)") }),
+            if torque > 0.0 {
+                let r = solver::solve_external_pair(
+                    m_n, m_t, z, z, alpha, at_deg, beta, x, x, fw, 0.0, mat, torque, rpm,
                 );
+                if let Some(s) = &r.strength {
+                    let sfb = s.get("bending_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sb = s.get("lewis_bending_mpa").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sfh = s.get("contact_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
+                    let sh = s.get("hertz_contact_mpa").and_then(Value::as_f64).unwrap_or(0.0);
+                    let verdict = if sfb >= 1.5 && sfh >= 1.2 {
+                        "PASS"
+                    } else if sfb >= 1.0 && sfh >= 1.0 {
+                        "MARGINAL"
+                    } else {
+                        "UNDER-RATED"
+                    };
+                    patches.insert(
+                        "input_torque_nm".into(),
+                        json!({ "hint": format!("{verdict}: Bending SF={sfb:.2} ({sb:.0} MPa), Contact SH={sfh:.2} ({sh:.0} MPa)") }),
+                    );
+                }
             }
         }
         "gm-parallel-pair" => {
+            patches.insert(
+                "backlash".into(),
+                json!({ "default": smart_bl, "hint": mat_note }),
+            );
+            patches.insert(
+                "root_fillet".into(),
+                json!({ "default": smart_fillet }),
+            );
+
             let sizing_unit = values
                 .get("sizing_unit")
                 .and_then(Value::as_str)
@@ -506,10 +344,6 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
                 .get("module_system")
                 .and_then(Value::as_str)
                 .unwrap_or("normal");
-            let mat = values
-                .get("material")
-                .and_then(Value::as_str)
-                .unwrap_or("steel_1045");
             let torque = values
                 .get("input_torque_nm")
                 .and_then(Value::as_f64)
@@ -542,59 +376,89 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
                 torque,
                 rpm,
             );
-            {
-                if sizing_unit == "dp" {
-                    patches.insert(
-                        "diametral_pitch".into(),
-                        json!({ "hint": format!("Equivalent module m = {m_n:.3} mm") }),
-                    );
-                } else if sizing_unit == "cp" {
-                    patches.insert(
-                        "circular_pitch".into(),
-                        json!({ "hint": format!("Equivalent module m = {m_n:.3} mm") }),
-                    );
-                }
 
-                let ratio = z2 as f64 / z1 as f64;
-                let cd_hint = format!(
-                    "CD aw = {:.3} mm (alpha_w = {:.2} deg) | eps_a = {:.2} (tot {:.2}) | u = {:.3}:1",
-                    r.operating_center_distance_mm,
-                    r.operating_pressure_angle_deg,
-                    r.contact_ratio_transverse,
-                    r.contact_ratio_total,
-                    ratio
+            if torque > 0.0 && sizing_unit == "module" {
+                let (rec_m, rec_fw) = recommend_module_for_load(
+                    z1,
+                    z2,
+                    alpha,
+                    beta,
+                    mod_sys == "normal",
+                    x1,
+                    x2,
+                    mat,
+                    torque,
+                    rpm,
                 );
-                if sizing_mode == "by_ratio" {
-                    patches.insert("gear_ratio".into(), json!({ "hint": cd_hint }));
-                } else {
-                    patches.insert("teeth_2".into(), json!({ "hint": cd_hint }));
-                }
-
-                if x1 < r.x1_min_recommended - 0.01 {
-                    patches.insert(
-                        "profile_shift_1".into(),
-                        json!({ "hint": format!("Pinion undercut risk (z1 < {:.1}): suggest x1 >= +{:.2}", r.z1_min_no_undercut, r.x1_min_recommended) }),
-                    );
-                }
-
-                if let Some(s) = &r.strength {
-                    let sfb = s.get("bending_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
-                    let sb = s.get("lewis_bending_mpa").and_then(Value::as_f64).unwrap_or(0.0);
-                    let sfh = s.get("contact_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
-                    let sh = s.get("hertz_contact_mpa").and_then(Value::as_f64).unwrap_or(0.0);
-                    let verdict = if sfb >= 1.5 && sfh >= 1.2 {
-                        "PASS"
-                    } else if sfb >= 1.0 && sfh >= 1.0 {
-                        "MARGINAL"
-                    } else {
-                        "UNDER-RATED"
-                    };
-                    patches.insert(
-                        "input_torque_nm".into(),
-                        json!({ "hint": format!("{verdict}: Bending SF={sfb:.2} ({sb:.0} MPa), Contact SH={sfh:.2} ({sh:.0} MPa)") }),
-                    );
-                }
+                patches.insert(
+                    "module".into(),
+                    json!({
+                        "default": rec_m,
+                        "hint": format!("Smart ISO 54 sizing for {torque:.1} N·m: m >= {rec_m} mm, b >= {rec_fw:.0} mm")
+                    }),
+                );
+                patches.insert("face_width".into(), json!({ "default": rec_fw }));
+            } else if sizing_unit == "dp" {
+                patches.insert(
+                    "diametral_pitch".into(),
+                    json!({ "hint": format!("Equivalent module m = {m_n:.3} mm") }),
+                );
+            } else if sizing_unit == "cp" {
+                patches.insert(
+                    "circular_pitch".into(),
+                    json!({ "hint": format!("Equivalent module m = {m_n:.3} mm") }),
+                );
             }
+
+            let ratio = z2 as f64 / z1 as f64;
+            let cd_hint = format!(
+                "CD aw = {:.3} mm (alpha_w = {:.2} deg) | eps_a = {:.2} (tot {:.2}) | u = {:.3}:1",
+                r.operating_center_distance_mm,
+                r.operating_pressure_angle_deg,
+                r.contact_ratio_transverse,
+                r.contact_ratio_total,
+                ratio
+            );
+            if sizing_mode == "by_ratio" {
+                patches.insert("gear_ratio".into(), json!({ "hint": cd_hint }));
+            } else {
+                patches.insert("teeth_2".into(), json!({ "hint": cd_hint }));
+            }
+
+            if r.x1_min_recommended > 0.01 {
+                let rec_x1 = round2(r.x1_min_recommended).clamp(0.0, 1.0);
+                patches.insert(
+                    "profile_shift_1".into(),
+                    json!({
+                        "default": rec_x1,
+                        "hint": format!("Pinion undercut guard (z1 < {:.1}): auto-suggested x1 = +{rec_x1:.2}", r.z1_min_no_undercut)
+                    }),
+                );
+            }
+
+            if let Some(s) = &r.strength {
+                let sfb = s.get("bending_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
+                let sb = s.get("lewis_bending_mpa").and_then(Value::as_f64).unwrap_or(0.0);
+                let sfh = s.get("contact_safety_factor").and_then(Value::as_f64).unwrap_or(0.0);
+                let sh = s.get("hertz_contact_mpa").and_then(Value::as_f64).unwrap_or(0.0);
+                let verdict = if sfb >= 1.5 && sfh >= 1.2 {
+                    "PASS"
+                } else if sfb >= 1.0 && sfh >= 1.0 {
+                    "MARGINAL"
+                } else {
+                    "UNDER-RATED"
+                };
+                patches.insert(
+                    "input_torque_nm".into(),
+                    json!({ "hint": format!("{verdict}: Bending SF={sfb:.2} ({sb:.0} MPa), Contact SH={sfh:.2} ({sh:.0} MPa)") }),
+                );
+            }
+        }
+        "gm-planetary" | "gm-rack-pinion" | "gm-bevel-pair" | "gm-worm-drive" => {
+            patches.insert(
+                "backlash".into(),
+                json!({ "default": smart_bl, "hint": mat_note }),
+            );
         }
         _ => {}
     }
