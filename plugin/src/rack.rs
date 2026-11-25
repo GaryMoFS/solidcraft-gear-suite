@@ -31,6 +31,7 @@ struct RackPinionInput {
     rack_backing: f64,
     pinion_bore: f64,
     backlash: f64,
+    create_joints: bool,
 }
 
 impl Default for RackPinionInput {
@@ -53,6 +54,7 @@ impl Default for RackPinionInput {
             rack_backing: 8.0,
             pinion_bore: 6.0,
             backlash: 0.05,
+            create_joints: false,
         }
     }
 }
@@ -211,12 +213,32 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
         }),
     )?;
 
+    let mut joints_created = false;
+    if inp.create_joints && !crate::is_preview(raw) {
+        let pin_b = pinion
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or(&pin_body)
+            .to_string();
+        let bodies = alloc::vec![pin_b.clone(), rack_body.clone()];
+        crate::joints::make_components_from_bodies(&bodies)?;
+        let j_pin = format!("{p}_PinionJoint");
+        let j_rack = format!("{p}_RackJoint");
+        let p_pin = crate::joints::offset_point(&frame, 0.0, 0.0, 0.0);
+        let p_rack = crate::joints::offset_point(&frame, x_back, 0.0, 0.0);
+        crate::joints::add_revolute_joint(&j_pin, &pin_b, p_pin, &frame)?;
+        crate::joints::add_slider_joint(&j_rack, &rack_body, p_rack, frame.y_dir, frame.x_dir)?;
+        crate::joints::add_rack_pinion_link(&j_pin, &j_rack, &format!("{p}_pin_rp"))?;
+        joints_created = true;
+    }
+
     Ok(json!({
         "mode": "gm-rack-pinion",
         "prefix": p,
         "pitch_mm": pitch,
         "rack_teeth": inp.rack_teeth,
         "rack_length_mm": target_len,
+        "joints_created": joints_created,
         "pinion": pinion,
         "rack_body": rack_body,
     })

@@ -454,6 +454,35 @@ pub fn compute_dialog_hints(entry: &str, values: &Value) -> Value {
                 );
             }
         }
+        "gm-gear-train" => {
+            patches.insert(
+                "backlash".into(),
+                json!({ "default": smart_bl, "hint": mat_note }),
+            );
+            patches.insert(
+                "root_fillet".into(),
+                json!({ "default": smart_fillet }),
+            );
+            let n_stages = values.get("num_stages").and_then(Value::as_u64).unwrap_or(2) as u32;
+            let ratio = values.get("total_ratio").and_then(Value::as_f64).unwrap_or(12.0);
+            let min_p = values.get("min_pinion_teeth").and_then(Value::as_u64).unwrap_or(14) as u32;
+            let max_g = values.get("max_gear_teeth").and_then(Value::as_u64).unwrap_or(72) as u32;
+            let stages = crate::train::split_train_stages(n_stages, ratio, min_p, max_g);
+            let mut summary = alloc::string::String::new();
+            let mut actual = 1.0_f64;
+            for (i, (zp, zg)) in stages.iter().enumerate() {
+                if i > 0 {
+                    summary.push_str(" x ");
+                }
+                let u = *zg as f64 / *zp as f64;
+                actual *= u;
+                summary.push_str(&format!("S{}:{}T->{}T({:.2})", i + 1, zp, zg, u));
+            }
+            patches.insert(
+                "total_ratio".into(),
+                json!({ "hint": format!("{summary} = {actual:.2}:1") }),
+            );
+        }
         "gm-planetary" | "gm-rack-pinion" | "gm-bevel-pair" | "gm-worm-drive" => {
             patches.insert(
                 "backlash".into(),

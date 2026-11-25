@@ -7,12 +7,14 @@ mod bevel;
 mod cycloidal;
 mod cylindrical;
 mod geneva;
+mod joints;
 mod knurl;
 mod placement;
 mod planetary;
 mod rack;
 pub mod panel;
 pub mod solver;
+mod train;
 mod worm;
 
 use alloc::collections::BTreeSet;
@@ -57,6 +59,7 @@ impl EntryGuest for GearSuitePlugin {
             "gm-worm-drive" => worm::run_worm_drive(&value),
             "gm-knurl" => knurl::run_knurl(&value),
             "gm-geneva" => geneva::run_geneva(&value),
+            "gm-gear-train" => train::run_gear_train(&value),
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
     }

@@ -418,8 +418,9 @@ pub fn build_parametric_gear(
     };
 
     // Optional ISO 0.3*m root fillet on the single tooth before circular patterning.
-    // Cap radius to the available radial-stub / root-arc length so sketch.fillet always fits.
-    if spec.root_fillet {
+    // Applied when a radial root stub exists (arc-line corner); SolidCraft v0.48.1 does not yet
+    // support sketch.fillet directly on equation_curve fit-point splines (r_f >= r_b, large z).
+    if spec.root_fillet && needs_radial {
         let ((c1a, c1b), (c2a, c2b)) = root_corners;
         let alpha_rad = spec.at_deg * core::f64::consts::PI / 180.0;
         let inv_a_val = libm::tan(alpha_rad) - alpha_rad;
@@ -818,6 +819,7 @@ struct ParallelPairInput {
     backlash: f64,
     backlash_mode: String,
     root_fillet: bool,
+    create_joints: bool,
     material: String,
     input_torque_nm: f64,
     input_rpm: f64,
@@ -854,6 +856,7 @@ impl Default for ParallelPairInput {
             backlash: 0.05,
             backlash_mode: "tooth_thinning".into(),
             root_fillet: false,
+            create_joints: false,
             material: "steel_1045".into(),
             input_torque_nm: 0.0,
             input_rpm: 0.0,
@@ -1079,6 +1082,23 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         },
     )?;
 
+    let mut joints_created = false;
+    if inp.create_joints && !crate::is_preview(raw) {
+        crate::report_progress(0.92, "Creating assembly components & gear joint")?;
+        let b1 = g1.get("body").and_then(Value::as_str).unwrap_or(&g1_body);
+        let b2 = g2.get("body").and_then(Value::as_str).unwrap_or(&g2_body);
+        crate::joints::setup_parallel_pair_joints(
+            &p,
+            b1,
+            b2,
+            &z1_p,
+            &z2_p,
+            mesh.operating_center_distance_mm,
+            &frame,
+        )?;
+        joints_created = true;
+    }
+
     crate::report_progress(1.0, "Parallel gear pair complete")?;
     Ok(json!({
         "mode": "gm-parallel-pair",
@@ -1087,6 +1107,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         "resolved_module_mm": inp.module,
         "center_distance_mm": mesh.operating_center_distance_mm,
         "gear_ratio": inp.teeth_2 as f64 / inp.teeth_1 as f64,
+        "joints_created": joints_created,
         "pinion": g1,
         "gear": g2,
         "engineering": mesh.to_json(),
