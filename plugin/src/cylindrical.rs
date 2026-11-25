@@ -72,6 +72,7 @@ pub struct GearSpec<'a> {
     pub shift_val: f64,
     pub bore_val: f64,
     pub rim_val: f64,
+    pub root_fillet: bool,
     pub preview_only: bool,
 }
 
@@ -351,12 +352,12 @@ pub fn build_parametric_gear(
     let p_hp_pos = pt_on_rf(ang(hp.clone()));
 
     let mut pattern_entities: Vec<String> = Vec::new();
-    pattern_entities.push(bot_curve);
-    pattern_entities.push(top_curve);
+    pattern_entities.push(bot_curve.clone());
+    pattern_entities.push(top_curve.clone());
     pattern_entities.push(tip_curve);
 
     let needs_radial = r_in_val < base_dia / 2.0 - 1e-3;
-    if needs_radial {
+    let root_corners: ((String, String), (String, String)) = if needs_radial {
         let p_psi_neg = pt_on_rf(ang(format!("-{psi}")));
         let p_psi_pos = pt_on_rf(ang(psi.clone()));
         let p_mid_neg = pt_on_rf(ang(format!("-0.5 * ({hp} + {psi})")));
@@ -366,22 +367,29 @@ pub fn build_parametric_gear(
             "sketch.arc.three_point",
             json!({ "start": p_hp_neg, "through": p_mid_neg, "end": p_psi_neg, "connect": true }),
         )?;
+        let a_bot_id = extract_created_curve_id(&a_bot, "bot inner arc")?;
+        let a_bot_end = format!("{a_bot_id}.end");
         let l_bot = run_cmd(
             "sketch.line",
-            json!({ "points": [p_psi_neg, bot_start], "connect": true }),
+            json!({ "points": [a_bot_end, bot_start], "connect": true }),
         )?;
         let l_top = run_cmd(
             "sketch.line",
             json!({ "points": [top_start, p_psi_pos], "connect": true }),
         )?;
+        let l_top_id = extract_created_curve_id(&l_top, "top radial line")?;
+        let l_top_end = format!("{l_top_id}.end");
         let a_top = run_cmd(
             "sketch.arc.three_point",
-            json!({ "start": p_psi_pos, "through": p_mid_pos, "end": p_hp_pos, "connect": true }),
+            json!({ "start": l_top_end, "through": p_mid_pos, "end": p_hp_pos, "connect": true }),
         )?;
-        pattern_entities.push(extract_created_curve_id(&a_bot, "bot inner arc")?);
-        pattern_entities.push(extract_created_curve_id(&l_bot, "bot radial line")?);
-        pattern_entities.push(extract_created_curve_id(&l_top, "top radial line")?);
-        pattern_entities.push(extract_created_curve_id(&a_top, "top inner arc")?);
+        let l_bot_id = extract_created_curve_id(&l_bot, "bot radial line")?;
+        let a_top_id = extract_created_curve_id(&a_top, "top inner arc")?;
+        pattern_entities.push(a_bot_id.clone());
+        pattern_entities.push(l_bot_id.clone());
+        pattern_entities.push(l_top_id.clone());
+        pattern_entities.push(a_top_id.clone());
+        ((a_bot_id, l_bot_id), (l_top_id, a_top_id))
     } else {
         let psi_f = format!("{gp}_psi_f");
         upsert_param(
@@ -402,8 +410,62 @@ pub fn build_parametric_gear(
             "sketch.arc.three_point",
             json!({ "start": top_start, "through": p_mid_pos, "end": p_hp_pos, "connect": true }),
         )?;
-        pattern_entities.push(extract_created_curve_id(&a_bot, "bot inner arc")?);
-        pattern_entities.push(extract_created_curve_id(&a_top, "top inner arc")?);
+        let a_bot_id = extract_created_curve_id(&a_bot, "bot inner arc")?;
+        let a_top_id = extract_created_curve_id(&a_top, "top inner arc")?;
+        pattern_entities.push(a_bot_id.clone());
+        pattern_entities.push(a_top_id.clone());
+        ((a_bot_id, bot_curve), (top_curve, a_top_id))
+    };
+
+    // Optional ISO 0.3*m root fillet on the single tooth before circular patterning.
+    // Cap radius to the available radial-stub / root-arc length so sketch.fillet always fits.
+    if spec.root_fillet {
+        let ((c1a, c1b), (c2a, c2b)) = root_corners;
+        let alpha_rad = spec.at_deg * core::f64::consts::PI / 180.0;
+        let inv_a_val = libm::tan(alpha_rad) - alpha_rad;
+        let psi_val = (core::f64::consts::PI / 2.0 + 2.0 * spec.shift_val * libm::tan(alpha_rad))
+            / (spec.teeth_val as f64)
+            + inv_a_val;
+        let hp_val = core::f64::consts::PI / (spec.teeth_val as f64);
+        let root_arc_len = (r_in_val * (hp_val - psi_val).max(0.0)).max(0.0);
+        let max_r = if needs_radial {
+            let radial_len = (base_dia / 2.0 - r_in_val).max(0.0);
+            0.75 * radial_len.min(root_arc_len)
+        } else {
+            0.75 * root_arc_len
+        };
+        let desired_r = 0.3 * spec.m_val;
+        let coeff = if max_r >= desired_r {
+            Some(0.3)
+        } else if max_r >= 0.05 * spec.m_val {
+            Some(max_r / spec.m_val)
+        } else {
+            None
+        };
+        if let Some(c_ratio) = coeff {
+            let rad_expr = if libm::fabs(c_ratio - 0.3) < 1e-4 {
+                format!("0.3 * {}", spec.m_param)
+            } else {
+                format!("{c_ratio:.4} * {}", spec.m_param)
+            };
+            let fil_res = run_cmd(
+                "sketch.fillet",
+                json!({
+                    "points": [
+                        { "a": c1a, "b": c1b },
+                        { "a": c2a, "b": c2b }
+                    ],
+                    "radius": rad_expr
+                }),
+            )?;
+            if let Some(arr) = fil_res.get("curves").and_then(Value::as_array) {
+                for c in arr {
+                    if let Some(cid) = c.as_str() {
+                        pattern_entities.push(cid.to_string());
+                    }
+                }
+            }
+        }
     }
 
     run_cmd(
@@ -529,6 +591,7 @@ struct CylindricalGearInput {
     rim_thickness: f64,
     profile_shift: f64,
     backlash: f64,
+    root_fillet: bool,
     body_name: String,
 }
 
@@ -557,6 +620,7 @@ impl Default for CylindricalGearInput {
             rim_thickness: 6.0,
             profile_shift: 0.0,
             backlash: 0.05,
+            root_fillet: false,
             body_name: "GM_Gear".into(),
         }
     }
@@ -675,6 +739,7 @@ pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
             shift_val: inp.profile_shift,
             bore_val: inp.bore_diameter,
             rim_val: inp.rim_thickness,
+            root_fillet: inp.root_fillet,
             preview_only: crate::is_preview(raw),
         },
     )?;
@@ -696,6 +761,16 @@ pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
         0.0,
         0.0,
     );
+    if !crate::is_preview(raw) {
+        crate::panel::publish_single_gear_report(
+            &format!("{body_name} ({} {})", inp.gear_side, inp.tooth_type),
+            inp.module,
+            mt_val,
+            inp.teeth,
+            inp.pressure_angle,
+            &mesh,
+        );
+    }
     crate::report_progress(1.0, "Cylindrical gear complete")?;
 
     Ok(json!({
@@ -746,6 +821,7 @@ struct ParallelPairInput {
     profile_shift_2: f64,
     backlash: f64,
     backlash_mode: String,
+    root_fillet: bool,
     material: String,
     input_torque_nm: f64,
     input_rpm: f64,
@@ -781,6 +857,7 @@ impl Default for ParallelPairInput {
             profile_shift_2: 0.0,
             backlash: 0.05,
             backlash_mode: "tooth_thinning".into(),
+            root_fillet: false,
             material: "steel_1045".into(),
             input_torque_nm: 0.0,
             input_rpm: 0.0,
@@ -961,6 +1038,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             shift_val: inp.profile_shift_1,
             bore_val: inp.bore_1,
             rim_val: 0.0,
+            root_fillet: inp.root_fillet,
             preview_only: crate::is_preview(raw),
         },
     )?;
@@ -1000,10 +1078,21 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             shift_val: inp.profile_shift_2,
             bore_val: inp.bore_2,
             rim_val: 0.0,
+            root_fillet: inp.root_fillet,
             preview_only: crate::is_preview(raw),
         },
     )?;
 
+    if !crate::is_preview(raw) {
+        crate::panel::publish_pair_report(
+            &format!("{p} ({} pair)", inp.tooth_type),
+            inp.module,
+            mt_val,
+            inp.teeth_1,
+            inp.teeth_2,
+            &mesh,
+        );
+    }
     crate::report_progress(1.0, "Parallel gear pair complete")?;
     Ok(json!({
         "mode": "gm-parallel-pair",

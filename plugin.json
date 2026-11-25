@@ -1,9 +1,9 @@
 {
   "id": "solidcraft-gear-suite",
   "name": "GM Gear Suite",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Complete Shwivel-style parametric gear & drive suite: Cylindrical (External/Internal, Straight/Helical/Herringbone), Parallel Pair, Planetary, Rack & Pinion, Cycloidal, Straight & Spiral Bevel, Worm Drive, Knurl, and Geneva Mechanism.",
-  "capabilities": ["commands@0.2"],
+  "capabilities": ["commands@0.2", "ui@0.1", "dialog@0.1"],
   "runtime": {
     "module": "solidcraft-gear-suite.wasm",
     "commands": [
@@ -21,6 +21,7 @@
       "sketch.equation_curve",
       "sketch.line",
       "sketch.arc.three_point",
+      "sketch.fillet",
       "sketch.pattern.circular",
       "sketch.finish",
       "solid.cylinder",
@@ -35,10 +36,81 @@
       "memory_mib": 64,
       "deadline_ms": 180000
     },
+    "ui": {
+      "ui_version": 1,
+      "panels": [
+        {
+          "id": "gm-engineering",
+          "title": "GM Gear Engineering",
+          "zones": ["right", "bottom"],
+          "layout": {
+            "root": 0,
+            "nodes": [
+              {
+                "widget": {
+                  "tabs": [
+                    { "label": "Geometry", "child": 1 },
+                    { "label": "Strength & Safety", "child": 2 },
+                    { "label": "Warnings", "child": 3 }
+                  ]
+                }
+              },
+              {
+                "widget": {
+                  "table": {
+                    "bind": "/geometry",
+                    "row_id": "id",
+                    "columns": [
+                      { "key": "metric", "label": "Parameter", "unit": null },
+                      { "key": "value", "label": "Value", "unit": null }
+                    ],
+                    "select": "none",
+                    "on_select": null,
+                    "on_edit": null
+                  }
+                }
+              },
+              {
+                "widget": {
+                  "table": {
+                    "bind": "/strength",
+                    "row_id": "id",
+                    "columns": [
+                      { "key": "metric", "label": "Check", "unit": null },
+                      { "key": "value", "label": "Value", "unit": null }
+                    ],
+                    "select": "none",
+                    "on_select": null,
+                    "on_edit": null
+                  }
+                }
+              },
+              {
+                "widget": {
+                  "table": {
+                    "bind": "/warnings",
+                    "row_id": "id",
+                    "columns": [
+                      { "key": "level", "label": "Status", "unit": null },
+                      { "key": "message", "label": "Engineering Note", "unit": null }
+                    ],
+                    "select": "none",
+                    "on_select": null,
+                    "on_edit": null
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "workspaces": []
+    },
     "entries": [
       {
         "name": "gm-cylindrical-gear",
         "effect": "edit",
+        "dialog_hook": true,
         "slots": [
           { "kind": "menu", "name": "GM Cylindrical Gear..." },
           { "kind": "ribbon", "name": "GM Gear" }
@@ -51,7 +123,7 @@
             "placement", "base_plane", "flip_direction", "axial_offset",
             "gear_side", "tooth_type", "helix_angle", "hand", "module_system",
             "prefix", "sizing_unit", "module", "diametral_pitch", "circular_pitch", "teeth", "pressure_angle", "face_width",
-            "bore_diameter", "rim_thickness", "profile_shift", "backlash", "body_name", "fast_preview"
+            "bore_diameter", "rim_thickness", "profile_shift", "backlash", "root_fillet", "body_name", "fast_preview"
           ],
           "properties": {
             "fast_preview": {
@@ -156,6 +228,7 @@
             },
             "profile_shift": { "type": "number", "title": "Profile Shift", "minimum": -0.5, "maximum": 1.0, "default": 0.0 },
             "backlash": { "type": "number", "title": "Backlash", "unit": "mm", "minimum": 0.0, "maximum": 5.0, "default": 0.05 },
+            "root_fillet": { "type": "boolean", "title": "Root Fillet (0.3m)", "description": "Round tooth roots with a 0.3*m fillet arc (SolidCraft v0.48+).", "default": false },
             "body_name": { "type": "string", "title": "Body Name", "default": "GM_Gear" }
           }
         }
@@ -163,6 +236,7 @@
       {
         "name": "gm-parallel-pair",
         "effect": "edit",
+        "dialog_hook": true,
         "slots": [
           { "kind": "menu", "name": "GM Parallel Gear Pair..." },
           { "kind": "ribbon", "name": "GM Parallel Pair" }
@@ -177,7 +251,7 @@
             "prefix", "sizing_mode", "sizing_unit", "module", "diametral_pitch", "circular_pitch",
             "teeth_1", "teeth_2", "gear_ratio", "pressure_angle", "face_width",
             "bore_1", "bore_2", "profile_shift_1", "profile_shift_2", "backlash", "backlash_mode",
-            "material", "input_torque_nm", "input_rpm", "fast_preview"
+            "root_fillet", "material", "input_torque_nm", "input_rpm", "fast_preview"
           ],
           "properties": {
             "fast_preview": {
@@ -287,6 +361,7 @@
               ],
               "default": "tooth_thinning"
             },
+            "root_fillet": { "type": "boolean", "title": "Root Fillet (0.3m)", "description": "Round tooth roots with a 0.3*m fillet arc (SolidCraft v0.48+).", "default": false },
             "material": {
               "type": "string", "title": "Material (Strength Check)",
               "oneOf": [

@@ -147,6 +147,7 @@ pub fn run_rack_pinion(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.pinion_bore,
             rim_val: 0.0,
+            root_fillet: false,
             preview_only: crate::is_preview(raw),
         },
     )?;

@@ -266,6 +266,7 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
             shift_val: 0.0,
             bore_val: inp.wheel_bore,
             rim_val: 0.0,
+            root_fillet: false,
             preview_only,
         },
     )?;

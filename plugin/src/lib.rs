@@ -11,6 +11,7 @@ mod knurl;
 mod placement;
 mod planetary;
 mod rack;
+pub mod panel;
 pub mod solver;
 mod worm;
 
@@ -29,19 +30,21 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 wit_bindgen::generate!({
     path: "../wit/plugin.wit",
-    world: "command-plugin",
+    world: "panel-dialog-plugin",
 });
 
 use craft::plugin::commands;
 use craft::plugin::control;
 pub use craft::plugin::types::{FieldFailure, PluginError};
-use exports::craft::plugin::entry::Guest;
+use exports::craft::plugin::dialog_provider::Guest as DialogGuest;
+use exports::craft::plugin::entry::Guest as EntryGuest;
+use exports::craft::plugin::ui_provider::Guest as UiGuest;
 
 struct GearSuitePlugin;
 
 export!(GearSuitePlugin);
 
-impl Guest for GearSuitePlugin {
+impl EntryGuest for GearSuitePlugin {
     fn execute(entry: String, params: String) -> Result<String, PluginError> {
         let value: Value =
             serde_json::from_str(&params).map_err(|e| invalid("params", format!("invalid JSON: {e}")))?;
@@ -57,6 +60,32 @@ impl Guest for GearSuitePlugin {
             "gm-geneva" => geneva::run_geneva(&value),
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
+    }
+}
+
+impl UiGuest for GearSuitePlugin {
+    fn describe() -> craft::plugin::ui::Declarations {
+        panel::describe_panel()
+    }
+
+    fn on_event(_event: craft::plugin::ui::UiEvent) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_enter(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_exit(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+impl DialogGuest for GearSuitePlugin {
+    fn update_fields(entry: String, values: String) -> Result<String, PluginError> {
+        let value: Value = serde_json::from_str(&values).unwrap_or_else(|_| json!({}));
+        let patches = panel::compute_dialog_hints(&entry, &value);
+        Ok(patches.to_string())
     }
 }
 
