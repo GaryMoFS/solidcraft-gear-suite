@@ -54,7 +54,12 @@
             "bore_diameter", "rim_thickness", "profile_shift", "backlash", "body_name"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array",
               "title": "Placement Reference (optional)",
@@ -153,7 +158,12 @@
             "bore_1", "bore_2", "backlash", "backlash_mode"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Pinion Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -254,7 +264,12 @@
             "face_width", "sun_bore", "planet_bore", "ring_wall", "backlash"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -338,7 +353,12 @@
             "rack_backing", "pinion_bore", "backlash"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Pinion Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -399,7 +419,12 @@
             "bore_dia", "output_hole_count", "output_hole_dia", "output_pcd", "include_pins"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -447,7 +472,12 @@
             "face_width", "bore_1", "bore_2", "backlash"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Apex Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -530,7 +560,12 @@
             "pressure_angle", "wheel_width", "worm_bore", "wheel_bore", "hand", "backlash"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }
@@ -600,7 +635,12 @@
             "pitch", "depth", "angle", "bore_diameter", "body_name"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "target_face": {
               "type": "array",
               "title": "Target Cylindrical Face (optional)",
@@ -657,7 +697,12 @@
             "clearance", "wheel_bore", "driver_bore", "include_driver"
           ],
           "properties": {
-            "_preview": { "type": "boolean", "default": false },
+            "fast_preview": {
+              "type": "boolean",
+              "title": "Fast Preview",
+              "description": "Use lightweight envelopes/cones for instant Preview (Run always builds full 3D teeth).",
+              "default": true
+            },
             "placement": {
               "type": "array", "title": "Wheel Placement Reference (optional)", "maxItems": 1, "items": { "type": "object" },
               "x-solidcraft-selection": { "version": 1, "accept": ["axis", "plane", "face", "edge", "sketch_point", "sketch_curve"] }

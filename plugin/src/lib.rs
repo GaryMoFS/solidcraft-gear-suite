@@ -60,7 +60,10 @@ impl Guest for GearSuitePlugin {
 }
 
 pub fn is_preview(raw: &Value) -> bool {
-    raw.get("_preview").and_then(Value::as_bool).unwrap_or(false)
+    raw.get("fast_preview")
+        .or_else(|| raw.get("_preview"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub fn invalid(field: &str, reason: impl Into<String>) -> PluginError {
