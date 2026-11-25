@@ -234,6 +234,7 @@ pub fn run_gear_train(raw: &Value) -> Result<String, PluginError> {
         let zg_p = format!("{p}_s{s_num}_zg");
         let xp_p = format!("{p}_s{s_num}_xp");
         let xg_p = format!("{p}_s{s_num}_xg");
+        let phi_p_p = format!("{p}_s{s_num}_phip");
         let phi_g_p = format!("{p}_s{s_num}_phig");
 
         upsert_param(&mut existing, &zp_p, &format!("{zp}"), "", &format!("Stage {s_num} pinion teeth"), true)?;
@@ -241,13 +242,15 @@ pub fn run_gear_train(raw: &Value) -> Result<String, PluginError> {
         upsert_param(&mut existing, &xp_p, &fmt_num(shaft_x_mm), "mm", &format!("Stage {s_num} pinion X"), false)?;
         upsert_param(&mut existing, &xg_p, &fmt_num(next_x_mm), "mm", &format!("Stage {s_num} gear X"), false)?;
 
-        // Phase gear tooth to mesh cleanly on the +X or -X side of the pinion
-        let phase_expr = if dir_sign > 0.0 {
-            format!("pi + pi / {zg_p}")
+        // Always orient Pinion tooth #0 toward Gear (+X when dir_sign > 0, -X when dir_sign < 0),
+        // and orient Gear with a tooth space facing Pinion. Works identically for even & odd tooth counts.
+        let (pinion_phi_opt, gear_phase_expr) = if dir_sign > 0.0 {
+            (None, format!("pi + pi / {zg_p}"))
         } else {
-            format!("pi / {zg_p}")
+            upsert_param(&mut existing, &phi_p_p, "pi", "", &format!("Stage {s_num} pinion phase (rad)"), false)?;
+            (Some(phi_p_p.as_str()), format!("pi / {zg_p}"))
         };
-        upsert_param(&mut existing, &phi_g_p, &phase_expr, "", &format!("Stage {s_num} mesh phase (rad)"), false)?;
+        upsert_param(&mut existing, &phi_g_p, &gear_phase_expr, "", &format!("Stage {s_num} mesh phase (rad)"), false)?;
 
         let p_body = unique_name(&format!("{p}_S{s_num}_Pinion"), &mut existing_names);
         let p_sk = unique_name(&format!("{p}_S{s_num}_PinionSk"), &mut existing_names);
@@ -269,7 +272,7 @@ pub fn run_gear_train(raw: &Value) -> Result<String, PluginError> {
                 bl_param: &bl_p,
                 bore_param: if inp.bore_diameter > 0.0 { Some(&bore_p) } else { None },
                 rim_param: None,
-                phi_param: None,
+                phi_param: pinion_phi_opt,
                 gear_side: GearSide::External,
                 tooth_kind,
                 beta_param: beta_p.as_deref(),
