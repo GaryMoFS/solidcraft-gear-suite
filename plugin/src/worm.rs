@@ -149,6 +149,7 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
         z_dir: frame.y_dir,
     };
 
+    crate::report_progress(0.15, "Building Worm")?;
     let worm_sk = unique_name(&format!("{p}_WormProfile"), &mut existing_names);
     let worm_path = unique_name(&format!("{p}_WormAxis"), &mut existing_names);
     let worm_body = unique_name(&format!("{p}_Worm"), &mut existing_names);
@@ -231,6 +232,7 @@ pub fn run_worm_drive(raw: &Value) -> Result<String, PluginError> {
     }
 
     // 2. Build mating Helical Worm Wheel at x = cd_p, axis along frame.z_dir, helix angle = lead_angle!
+    crate::report_progress(0.55, "Building Worm Wheel")?;
     let wheel_sk = unique_name(&format!("{p}_WheelSketch"), &mut existing_names);
     let wheel_path = unique_name(&format!("{p}_WheelAxis"), &mut existing_names);
     let wheel_body = unique_name(&format!("{p}_WormWheel"), &mut existing_names);

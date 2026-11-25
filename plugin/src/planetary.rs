@@ -199,6 +199,7 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &phi_ring_p, &ring_phase, "", "Ring meshing phase (rad)", false)?;
 
     // 1. Sun gear
+    crate::report_progress(0.15, "Building Sun gear")?;
     let sun_sk = unique_name(&format!("{p}_SunSketch"), &mut existing_names);
     let sun_path = unique_name(&format!("{p}_SunAxis"), &mut existing_names);
     let sun_body = unique_name(&format!("{p}_Sun"), &mut existing_names);
@@ -239,6 +240,8 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
     // 2. N Planet gears around orbit radius
     let mut planets = Vec::new();
     for k in 0..inp.num_planets {
+        let frac_p = 0.25 + 0.50 * (k as f32) / (inp.num_planets as f32);
+        crate::report_progress(frac_p, &format!("Building Planet {} of {}", k + 1, inp.num_planets))?;
         let ang_deg = 360.0 * (k as f64) / (inp.num_planets as f64);
         let p_frame = frame.rotated_z(ang_deg);
         let pl_sk = unique_name(&format!("{p}_Planet{}_Sketch", k + 1), &mut existing_names);
@@ -292,6 +295,7 @@ pub fn run_planetary(raw: &Value) -> Result<String, PluginError> {
     }
 
     // 3. Internal Ring gear
+    crate::report_progress(0.80, "Building Internal Ring gear")?;
     let ring_sk = unique_name(&format!("{p}_RingSketch"), &mut existing_names);
     let ring_path = unique_name(&format!("{p}_RingAxis"), &mut existing_names);
     let ring_body = unique_name(&format!("{p}_Ring"), &mut existing_names);

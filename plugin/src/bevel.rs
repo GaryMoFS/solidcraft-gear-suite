@@ -333,6 +333,7 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &format!("{p}_sigma"), &fmt_num(inp.shaft_angle), "deg", "Shaft angle", true)?;
     upsert_param(&mut existing, &format!("{p}_cone_dist"), &fmt_num(re), "mm", "Outer cone distance Re", true)?;
 
+    crate::report_progress(0.15, "Building Bevel Pinion")?;
     let b1 = build_single_bevel(
         &mut existing_names,
         &format!("{p}_p1"),
@@ -353,6 +354,7 @@ pub fn run_bevel_pair(raw: &Value) -> Result<String, PluginError> {
         crate::is_preview(raw),
     )?;
 
+    crate::report_progress(0.55, "Building Bevel Gear")?;
     let phase2 = core::f64::consts::PI + core::f64::consts::PI / z2;
     let b2 = build_single_bevel(
         &mut existing_names,

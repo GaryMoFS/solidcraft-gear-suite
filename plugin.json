@@ -1,7 +1,7 @@
 {
   "id": "solidcraft-gear-suite",
   "name": "GM Gear Suite",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Complete Shwivel-style parametric gear & drive suite: Cylindrical (External/Internal, Straight/Helical/Herringbone), Parallel Pair, Planetary, Rack & Pinion, Cycloidal, Straight & Spiral Bevel, Worm Drive, Knurl, and Geneva Mechanism.",
   "capabilities": ["commands@0.2"],
   "runtime": {
@@ -46,12 +46,12 @@
         "input_schema": {
           "type": "object",
           "x-solidcraft-preview": "manual",
-          "required": ["gear_side", "tooth_type", "prefix", "module", "teeth", "face_width", "pressure_angle"],
+          "required": ["gear_side", "tooth_type", "prefix", "teeth", "face_width", "pressure_angle"],
           "x-solidcraft-order": [
             "placement", "base_plane", "flip_direction", "axial_offset",
             "gear_side", "tooth_type", "helix_angle", "hand", "module_system",
-            "prefix", "module", "teeth", "pressure_angle", "face_width",
-            "bore_diameter", "rim_thickness", "profile_shift", "backlash", "body_name"
+            "prefix", "sizing_unit", "module", "diametral_pitch", "circular_pitch", "teeth", "pressure_angle", "face_width",
+            "bore_diameter", "rim_thickness", "profile_shift", "backlash", "body_name", "fast_preview"
           ],
           "properties": {
             "fast_preview": {
@@ -122,7 +122,27 @@
               "x-solidcraft-visible-when": { "field": "tooth_type", "in": ["helical", "herringbone"] }
             },
             "prefix": { "type": "string", "title": "Parameter Prefix", "default": "g1" },
-            "module": { "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0 },
+            "sizing_unit": {
+              "type": "string", "title": "Tooth Sizing Unit",
+              "oneOf": [
+                { "const": "module", "title": "Module (mm, ISO 54)" },
+                { "const": "dp", "title": "Diametral Pitch (DP, 1/in)" },
+                { "const": "cp", "title": "Circular Pitch (CP, mm)" }
+              ],
+              "default": "module"
+            },
+            "module": {
+              "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "module" }
+            },
+            "diametral_pitch": {
+              "type": "number", "title": "Diametral Pitch (DP)", "minimum": 0.5, "maximum": 120.0, "default": 12.7,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "dp" }
+            },
+            "circular_pitch": {
+              "type": "number", "title": "Circular Pitch (CP)", "unit": "mm", "minimum": 0.8, "maximum": 160.0, "default": 6.283,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "cp" }
+            },
             "teeth": { "type": "integer", "title": "Teeth", "minimum": 8, "maximum": 120, "default": 20 },
             "pressure_angle": { "type": "number", "title": "Pressure Angle", "unit": "deg", "minimum": 14.5, "maximum": 25.0, "default": 20.0 },
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 0.5, "maximum": 500.0, "default": 10.0 },
@@ -150,12 +170,14 @@
         "input_schema": {
           "type": "object",
           "x-solidcraft-preview": "manual",
-          "required": ["prefix", "module", "teeth_1", "face_width"],
+          "required": ["prefix", "teeth_1", "face_width"],
           "x-solidcraft-order": [
             "placement", "base_plane", "layout_angle", "flip_direction", "axial_offset",
             "tooth_type", "helix_angle", "hand", "module_system",
-            "prefix", "sizing_mode", "module", "teeth_1", "teeth_2", "gear_ratio", "pressure_angle", "face_width",
-            "bore_1", "bore_2", "backlash", "backlash_mode"
+            "prefix", "sizing_mode", "sizing_unit", "module", "diametral_pitch", "circular_pitch",
+            "teeth_1", "teeth_2", "gear_ratio", "pressure_angle", "face_width",
+            "bore_1", "bore_2", "profile_shift_1", "profile_shift_2", "backlash", "backlash_mode",
+            "material", "input_torque_nm", "input_rpm", "fast_preview"
           ],
           "properties": {
             "fast_preview": {
@@ -220,7 +242,27 @@
               ],
               "default": "by_teeth"
             },
-            "module": { "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0 },
+            "sizing_unit": {
+              "type": "string", "title": "Tooth Sizing Unit",
+              "oneOf": [
+                { "const": "module", "title": "Module (mm, ISO 54)" },
+                { "const": "dp", "title": "Diametral Pitch (DP, 1/in)" },
+                { "const": "cp", "title": "Circular Pitch (CP, mm)" }
+              ],
+              "default": "module"
+            },
+            "module": {
+              "type": "number", "title": "Module", "unit": "mm", "minimum": 0.25, "maximum": 50.0, "default": 2.0,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "module" }
+            },
+            "diametral_pitch": {
+              "type": "number", "title": "Diametral Pitch (DP)", "minimum": 0.5, "maximum": 120.0, "default": 12.7,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "dp" }
+            },
+            "circular_pitch": {
+              "type": "number", "title": "Circular Pitch (CP)", "unit": "mm", "minimum": 0.8, "maximum": 160.0, "default": 6.283,
+              "x-solidcraft-visible-when": { "field": "sizing_unit", "eq": "cp" }
+            },
             "teeth_1": { "type": "integer", "title": "Pinion Teeth (Z1)", "minimum": 8, "maximum": 100, "default": 16 },
             "teeth_2": {
               "type": "integer", "title": "Gear Teeth (Z2)", "minimum": 8, "maximum": 100, "default": 32,
@@ -234,6 +276,8 @@
             "face_width": { "type": "number", "title": "Face Width", "unit": "mm", "minimum": 0.5, "maximum": 500.0, "default": 10.0 },
             "bore_1": { "type": "number", "title": "Pinion Bore (D1)", "unit": "mm", "minimum": 0.0, "maximum": 500.0, "default": 6.0 },
             "bore_2": { "type": "number", "title": "Gear Bore (D2)", "unit": "mm", "minimum": 0.0, "maximum": 500.0, "default": 10.0 },
+            "profile_shift_1": { "type": "number", "title": "Pinion Profile Shift (x1)", "minimum": -0.5, "maximum": 1.0, "default": 0.0 },
+            "profile_shift_2": { "type": "number", "title": "Gear Profile Shift (x2)", "minimum": -0.5, "maximum": 1.0, "default": 0.0 },
             "backlash": { "type": "number", "title": "Backlash (Total)", "unit": "mm", "minimum": 0.0, "maximum": 5.0, "default": 0.05 },
             "backlash_mode": {
               "type": "string", "title": "Backlash Method",
@@ -242,6 +286,25 @@
                 { "const": "center_distance", "title": "Center Distance Increase (Nominal Teeth)" }
               ],
               "default": "tooth_thinning"
+            },
+            "material": {
+              "type": "string", "title": "Material (Strength Check)",
+              "oneOf": [
+                { "const": "steel_1045", "title": "Carbon Steel 1045" },
+                { "const": "steel_4140", "title": "Alloy Steel 4140 QT" },
+                { "const": "brass_c360", "title": "Brass C360" },
+                { "const": "pom_delrin", "title": "POM (Delrin / Acetal)" },
+                { "const": "pa66_nylon", "title": "PA66 Nylon" },
+                { "const": "peek", "title": "PEEK" },
+                { "const": "petg_3d", "title": "3D-Printed PETG / PLA" }
+              ],
+              "default": "steel_1045"
+            },
+            "input_torque_nm": {
+              "type": "number", "title": "Input Torque (0 = skip check)", "unit": "N·m", "minimum": 0.0, "maximum": 50000.0, "default": 0.0
+            },
+            "input_rpm": {
+              "type": "number", "title": "Input Speed (RPM)", "minimum": 0.0, "maximum": 50000.0, "default": 0.0
             }
           }
         }

@@ -518,7 +518,10 @@ struct CylindricalGearInput {
     hand: String,
     module_system: String,
     prefix: String,
+    sizing_unit: String,
     module: f64,
+    diametral_pitch: f64,
+    circular_pitch: f64,
     teeth: u32,
     pressure_angle: f64,
     face_width: f64,
@@ -543,7 +546,10 @@ impl Default for CylindricalGearInput {
             hand: "right".into(),
             module_system: "normal".into(),
             prefix: "g1".into(),
+            sizing_unit: "module".into(),
             module: 2.0,
+            diametral_pitch: 12.7,
+            circular_pitch: 6.283185,
             teeth: 20,
             pressure_angle: 20.0,
             face_width: 10.0,
@@ -557,15 +563,23 @@ impl Default for CylindricalGearInput {
 }
 
 pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
-    let inp: CylindricalGearInput =
+    let mut inp: CylindricalGearInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
-    if inp.module <= 0.0 || inp.face_width <= 0.0 {
-        return Err(invalid("module", "module and face_width must be positive"));
+    inp.module = crate::solver::resolve_module_mm(
+        &inp.sizing_unit,
+        inp.module,
+        inp.diametral_pitch,
+        inp.circular_pitch,
+    )
+    .map_err(|e| invalid("module", e))?;
+    if inp.face_width <= 0.0 {
+        return Err(invalid("face_width", "face_width must be positive"));
     }
     if inp.teeth < 8 || inp.teeth > 120 {
         return Err(invalid("teeth", "teeth must be between 8 and 120"));
     }
+    crate::report_progress(0.1, "Computing cylindrical gear parameters")?;
     let gear_side = GearSide::parse(&inp.gear_side);
     let tooth_kind = ToothKind::parse(&inp.tooth_type);
     let hand_sign = if inp.hand == "left" { -1.0 } else { 1.0 };
@@ -665,12 +679,39 @@ pub fn run_cylindrical_gear(raw: &Value) -> Result<String, PluginError> {
         },
     )?;
 
+    let beta_deg = if tooth_kind == ToothKind::Straight { 0.0 } else { inp.helix_angle };
+    let mesh = crate::solver::solve_external_pair(
+        inp.module,
+        mt_val,
+        inp.teeth,
+        inp.teeth,
+        inp.pressure_angle,
+        at_deg,
+        beta_deg,
+        inp.profile_shift,
+        inp.profile_shift,
+        inp.face_width,
+        0.0,
+        "steel_1045",
+        0.0,
+        0.0,
+    );
+    crate::report_progress(1.0, "Cylindrical gear complete")?;
+
     Ok(json!({
         "mode": "gm-cylindrical-gear",
         "gear_side": inp.gear_side,
         "tooth_type": inp.tooth_type,
         "prefix": p,
+        "resolved_module_mm": inp.module,
+        "nearest_iso54_module_mm": crate::solver::nearest_iso54_module(inp.module),
         "gear": info,
+        "engineering": {
+            "z_min_no_undercut": mesh.z1_min_no_undercut,
+            "x_min_recommended": mesh.x1_min_recommended,
+            "face_width_ratio_b_over_m": mesh.face_width_ratio,
+            "warnings": mesh.warnings,
+        },
     })
     .to_string())
 }
@@ -690,7 +731,10 @@ struct ParallelPairInput {
     module_system: String,
     prefix: String,
     sizing_mode: String,
+    sizing_unit: String,
     module: f64,
+    diametral_pitch: f64,
+    circular_pitch: f64,
     teeth_1: u32,
     teeth_2: u32,
     gear_ratio: f64,
@@ -698,8 +742,13 @@ struct ParallelPairInput {
     face_width: f64,
     bore_1: f64,
     bore_2: f64,
+    profile_shift_1: f64,
+    profile_shift_2: f64,
     backlash: f64,
     backlash_mode: String,
+    material: String,
+    input_torque_nm: f64,
+    input_rpm: f64,
 }
 
 impl Default for ParallelPairInput {
@@ -717,7 +766,10 @@ impl Default for ParallelPairInput {
             module_system: "normal".into(),
             prefix: "p1".into(),
             sizing_mode: "by_teeth".into(),
+            sizing_unit: "module".into(),
             module: 2.0,
+            diametral_pitch: 12.7,
+            circular_pitch: 6.283185,
             teeth_1: 16,
             teeth_2: 32,
             gear_ratio: 2.0,
@@ -725,8 +777,13 @@ impl Default for ParallelPairInput {
             face_width: 10.0,
             bore_1: 6.0,
             bore_2: 10.0,
+            profile_shift_1: 0.0,
+            profile_shift_2: 0.0,
             backlash: 0.05,
             backlash_mode: "tooth_thinning".into(),
+            material: "steel_1045".into(),
+            input_torque_nm: 0.0,
+            input_rpm: 0.0,
         }
     }
 }
@@ -735,8 +792,15 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     let mut inp: ParallelPairInput =
         serde_json::from_value(raw.clone()).map_err(|e| invalid("params", format!("invalid input: {e}")))?;
     let p = validate_prefix(&inp.prefix)?;
-    if inp.module <= 0.0 || inp.face_width <= 0.0 {
-        return Err(invalid("module", "module and face_width must be positive"));
+    inp.module = crate::solver::resolve_module_mm(
+        &inp.sizing_unit,
+        inp.module,
+        inp.diametral_pitch,
+        inp.circular_pitch,
+    )
+    .map_err(|e| invalid("module", e))?;
+    if inp.face_width <= 0.0 {
+        return Err(invalid("face_width", "face_width must be positive"));
     }
     if inp.sizing_mode == "by_ratio" {
         if !(0.2..=12.0).contains(&inp.gear_ratio) {
@@ -747,6 +811,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     if inp.teeth_1 < 8 || inp.teeth_1 > 100 || inp.teeth_2 < 8 || inp.teeth_2 > 100 {
         return Err(invalid("teeth_1", "tooth counts must be between 8 and 100"));
     }
+    crate::report_progress(0.1, "Solving ISO 21771 gear pair mesh")?;
     let tooth_kind = ToothKind::parse(&inp.tooth_type);
     let hand_sign_1 = if inp.hand == "left" { -1.0 } else { 1.0 };
     let hand_sign_2 = -hand_sign_1;
@@ -767,7 +832,8 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     let z2_p = format!("{p}_z2");
     let a_p = format!("{p}_alpha");
     let fw_p = format!("{p}_fw");
-    let x0_p = format!("{p}_x");
+    let x1_p = format!("{p}_x1");
+    let x2_p = format!("{p}_x2");
     let bl_p = format!("{p}_bl");
     let bl_tooth_p = format!("{p}_bl_tooth");
     let b1_p = format!("{p}_bore1");
@@ -783,7 +849,8 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &z2_p, &format!("{}", inp.teeth_2), "", "Gear tooth count (Z2)", true)?;
     upsert_param(&mut existing, &a_p, &fmt_num(inp.pressure_angle), "deg", "Shared pressure angle", true)?;
     upsert_param(&mut existing, &fw_p, &fmt_num(inp.face_width), "mm", "Shared face width", true)?;
-    upsert_param(&mut existing, &x0_p, "0", "", "Profile shift coefficient", false)?;
+    upsert_param(&mut existing, &x1_p, &fmt_num(inp.profile_shift_1), "", "Pinion profile shift x1", false)?;
+    upsert_param(&mut existing, &x2_p, &fmt_num(inp.profile_shift_2), "", "Gear profile shift x2", false)?;
     upsert_param(&mut existing, &bl_p, &fmt_num(inp.backlash), "mm", "Total circumferential meshing backlash jt", true)?;
     if cd_backlash {
         upsert_param(&mut existing, &bl_tooth_p, "0", "mm", "Per-gear tooth thinning (0 in center-distance mode)", false)?;
@@ -809,7 +876,48 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
         inp.pressure_angle,
     )?;
 
-    let cd_expr = if cd_backlash {
+    let at_rad = at_deg * core::f64::consts::PI / 180.0;
+    let bl_cd_add = if cd_backlash {
+        inp.backlash / (2.0 * libm::tan(at_rad))
+    } else {
+        0.0
+    };
+    let beta_deg = if tooth_kind == ToothKind::Straight { 0.0 } else { inp.helix_angle };
+    let mesh = crate::solver::solve_external_pair(
+        inp.module,
+        mt_val,
+        inp.teeth_1,
+        inp.teeth_2,
+        inp.pressure_angle,
+        at_deg,
+        beta_deg,
+        inp.profile_shift_1,
+        inp.profile_shift_2,
+        inp.face_width,
+        bl_cd_add,
+        &inp.material,
+        inp.input_torque_nm,
+        inp.input_rpm,
+    );
+
+    let has_shift_sum = libm::fabs(inp.profile_shift_1 + inp.profile_shift_2) > 1e-6;
+    let cd_expr = if has_shift_sum {
+        // Exact ISO 21771 shifted center distance aw = a * cos(at) / cos(aw) + backlash_add
+        let aw_p = format!("{p}_aw");
+        upsert_param(
+            &mut existing,
+            &aw_p,
+            &fmt_num(mesh.operating_pressure_angle_deg),
+            "deg",
+            "ISO 21771 operating pressure angle alpha_w",
+            false,
+        )?;
+        if cd_backlash {
+            format!("({mt_p} * ({z1_p} + {z2_p}) / 2) * cos({at_p}) / cos({aw_p}) + {bl_p} / (2 * tan({at_p}))")
+        } else {
+            format!("({mt_p} * ({z1_p} + {z2_p}) / 2) * cos({at_p}) / cos({aw_p})")
+        }
+    } else if cd_backlash {
         format!("{mt_p} * ({z1_p} + {z2_p}) / 2 + {bl_p} / (2 * tan({at_p}))")
     } else {
         format!("{mt_p} * ({z1_p} + {z2_p}) / 2")
@@ -818,6 +926,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
     upsert_param(&mut existing, &ratio_p, &format!("{z2_p} / {z1_p}"), "", "Gear ratio Z2 / Z1", true)?;
     upsert_param(&mut existing, &phi2_p, &format!("pi + pi / {z2_p}"), "", "Gear 2 meshing phase angle (rad)", false)?;
 
+    crate::report_progress(0.25, "Building Pinion (Gear 1)")?;
     let g1_prefix = format!("{p}_g1");
     let g1_sketch = unique_name(&format!("{p}_PinionTooth"), &mut existing_names);
     let g1_path = unique_name(&format!("{p}_PinionAxis"), &mut existing_names);
@@ -831,7 +940,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             at_param: &at_p,
             z_param: &z1_p,
             fw_param: &fw_p,
-            x_param: &x0_p,
+            x_param: &x1_p,
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_1 > 0.0 { Some(&b1_p) } else { None },
             rim_param: None,
@@ -849,13 +958,14 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             mt_val,
             at_deg,
             teeth_val: inp.teeth_1,
-            shift_val: 0.0,
+            shift_val: inp.profile_shift_1,
             bore_val: inp.bore_1,
             rim_val: 0.0,
             preview_only: crate::is_preview(raw),
         },
     )?;
 
+    crate::report_progress(0.65, "Building Gear 2")?;
     let g2_prefix = format!("{p}_g2");
     let g2_sketch = unique_name(&format!("{p}_GearTooth"), &mut existing_names);
     let g2_path = unique_name(&format!("{p}_GearAxis"), &mut existing_names);
@@ -869,7 +979,7 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             at_param: &at_p,
             z_param: &z2_p,
             fw_param: &fw_p,
-            x_param: &x0_p,
+            x_param: &x2_p,
             bl_param: &bl_tooth_p,
             bore_param: if inp.bore_2 > 0.0 { Some(&b2_p) } else { None },
             rim_param: None,
@@ -887,24 +997,24 @@ pub fn run_parallel_pair(raw: &Value) -> Result<String, PluginError> {
             mt_val,
             at_deg,
             teeth_val: inp.teeth_2,
-            shift_val: 0.0,
+            shift_val: inp.profile_shift_2,
             bore_val: inp.bore_2,
             rim_val: 0.0,
             preview_only: crate::is_preview(raw),
         },
     )?;
 
-    let at_rad = at_deg * core::f64::consts::PI / 180.0;
-    let cd_mm = mt_val * (inp.teeth_1 + inp.teeth_2) as f64 / 2.0
-        + if cd_backlash { inp.backlash / (2.0 * libm::tan(at_rad)) } else { 0.0 };
+    crate::report_progress(1.0, "Parallel gear pair complete")?;
     Ok(json!({
         "mode": "gm-parallel-pair",
         "tooth_type": inp.tooth_type,
         "prefix": p,
-        "center_distance_mm": cd_mm,
+        "resolved_module_mm": inp.module,
+        "center_distance_mm": mesh.operating_center_distance_mm,
         "gear_ratio": inp.teeth_2 as f64 / inp.teeth_1 as f64,
         "pinion": g1,
         "gear": g2,
+        "engineering": mesh.to_json(),
     })
     .to_string())
 }

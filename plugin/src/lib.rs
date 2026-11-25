@@ -11,6 +11,7 @@ mod knurl;
 mod placement;
 mod planetary;
 mod rack;
+pub mod solver;
 mod worm;
 
 use alloc::collections::BTreeSet;
@@ -57,6 +58,14 @@ impl Guest for GearSuitePlugin {
             _ => Err(invalid("entry", format!("unknown entry `{entry}`"))),
         }
     }
+}
+
+pub fn report_progress(fraction: f32, msg: &str) -> Result<(), PluginError> {
+    if control::cancelled() {
+        return Err(PluginError::Cancelled);
+    }
+    control::progress(fraction.clamp(0.0, 1.0), msg);
+    Ok(())
 }
 
 pub fn is_preview(raw: &Value) -> bool {
